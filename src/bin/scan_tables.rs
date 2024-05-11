@@ -6,7 +6,7 @@ table1: {rows: 5, cols:[1,5,6,4]}
 Takes about ~90sec using --release
  */
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use std::error::Error;
 use std::fs;
 use std::path::Path;
@@ -26,7 +26,7 @@ struct Table {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let mut stats = HashMap::new();
+    let mut stats = BTreeMap::new();
 
     let ctx = SessionContext::new();
     let table_dir = "C:\\Users\\G\\Desktop\\jobdata\\imdb";
