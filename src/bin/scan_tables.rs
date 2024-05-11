@@ -3,7 +3,7 @@ Scan all tables and return total num of rows, and distinct count for each col in
 
 table1: {rows: 5, cols:[1,5,6,4]}
 
-Takes about ~90sec using --release
+Takes about ~70sec using --release
  */
 
 use std::collections::{BTreeMap, HashSet};
@@ -51,7 +51,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 let arr = cast(record.column(i), &DataType::Utf8).unwrap();
                 let string_array = as_string_array(&arr);
                 for v in string_array {
-                    if v.is_none() {
+                    if v.is_none() || sets.get(i).unwrap().contains(v.unwrap()) {
                         continue;
                     }
                     sets.get_mut(i).unwrap().insert(v.unwrap().to_string());
