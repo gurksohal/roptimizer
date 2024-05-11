@@ -1,7 +1,13 @@
 use std::collections::HashMap;
 use std::error::Error;
 use std::fs;
-use roptimizer::TableStats;
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TableStats {
+    pub rows: u64,
+    pub cols: Vec<u64>
+}
 
 #[derive(Debug)]
 pub struct Catalog {
