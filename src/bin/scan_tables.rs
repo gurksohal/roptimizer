@@ -16,13 +16,7 @@ use datafusion::arrow::array::as_string_array;
 use datafusion::arrow::compute::cast;
 use datafusion::arrow::datatypes::DataType;
 use datafusion::prelude::{ParquetReadOptions, SessionContext};
-use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Serialize, Deserialize)]
-struct Table {
-    rows: u64,
-    cols: Vec<u64>
-}
+use roptimizer::TableStats;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -64,7 +58,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             cols.push(set.len() as u64);
         }
 
-        let stat = Table {
+        let stat = TableStats {
             rows,
             cols,
         };

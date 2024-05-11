@@ -1,3 +1,9 @@
+use crate::catalog::Catalog;
+
+mod catalog;
+
+
 fn main() {
-    println!("Hello, world!");
+    let catalog = Catalog::build().unwrap();
+    println!("{catalog:?}");
 }
