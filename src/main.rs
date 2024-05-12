@@ -10,7 +10,7 @@ mod catalog;
 async fn main() {
     let ctx = SessionContext::new();
     load_job_data(&ctx).await;
-    let plan = get_df_plan(&ctx, "15a").await;
+    let plan = get_df_plan(&ctx, "1a").await;
     println!("{}", verify_plan(&plan));
 }
 
