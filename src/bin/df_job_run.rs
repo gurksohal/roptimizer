@@ -9,6 +9,7 @@ use datafusion::arrow::datatypes::DataType;
 
 use datafusion::prelude::{ParquetReadOptions, SessionConfig, SessionContext};
 
+// Takes ~14 mins
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let mut res = BTreeMap::new();
@@ -19,7 +20,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let ctx = SessionContext::new_with_config(config);
     let table_dir = "C:\\Users\\G\\Desktop\\jobdata\\imdb";
     let mut tables = fs::read_dir(table_dir)?;
-    let global_start = Instant::now();
+    let start = Instant::now();
     while let Some(Ok(entry)) =  tables.next() {
         let path = entry.path();
         let filename = entry.file_name();
@@ -29,7 +30,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         ctx.register_parquet(filename, path.as_os_str().to_str().unwrap(), ParquetReadOptions::default()).await?;
     }
 
-    exec_time.insert(String::from("load_time"), (Instant::now()-global_start).as_millis());
+    let mut total_time = (Instant::now()-start).as_millis();
+    exec_time.insert(String::from("load_time"), total_time);
     
     let queries_path = "C:/Users/G/Desktop/jobdata/query";
     let mut files = fs::read_dir(queries_path)?;
@@ -38,11 +40,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let filename = entry.file_name();
         let filename = filename.to_str().expect("error with name");
         let query = fs::read_to_string(sql_path)?;
-
+        
         let local_start = Instant::now();
         let df = ctx.sql(query.as_str()).await?;
         let records = df.collect().await?;
         let time = (Instant::now() - local_start).as_millis();
+        
+        total_time += time;
         exec_time.insert(filename.to_string(), time);
         
         let mut r = vec![];
@@ -62,9 +66,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         res.insert(filename.to_string(), r);
     }
     
-    let end = Instant::now();
-    let time = (end-global_start).as_millis();
-    exec_time.insert(String::from("total_time"), time);
+    exec_time.insert(String::from("total_time"), total_time);
 
     let exec_time_json = serde_json::to_string(&exec_time)?;
     let res_json = serde_json::to_string(&res)?;
