@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TableStats {
     pub rows: u64,
-    pub cols: Vec<u64>
+    pub cols: HashMap<String, u64>
 }
 
 #[derive(Debug)]

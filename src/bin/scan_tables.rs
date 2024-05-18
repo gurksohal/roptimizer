@@ -3,10 +3,10 @@ Scan all tables and return total num of rows, and distinct count for each col in
 
 table1: {rows: 5, cols:[1,5,6,4]}
 
-Takes about ~70sec using --release
+Takes about ~60sec using --release
  */
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::error::Error;
 use std::fs;
 use std::path::Path;
@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TableStats {
     pub rows: u64,
-    pub cols: Vec<u64>
+    pub cols: HashMap<String, u64>
 }
 
 #[tokio::main]
@@ -45,8 +45,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
         let mut rows: u64 = 0;
         let mut sets: Vec<HashSet<String>> = vec![HashSet::new(); records.first().unwrap().num_columns()];
+        let mut names = vec![];
         for record in records {
             rows += record.num_rows() as u64;
+            names = record.schema().fields.iter().map(|x| x.name().to_string()).collect();
             for i in 0..record.num_columns() {
                 let arr = cast(record.column(i), &DataType::Utf8).unwrap();
                 let string_array = as_string_array(&arr);
@@ -59,10 +61,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
             }
         }
 
-        let mut cols: Vec<u64> = vec![];
-        for set in sets {
-            cols.push(set.len() as u64);
-        }
+        let mut cols: HashMap<String, u64> = HashMap::new();
+        sets.iter().enumerate().for_each(|e| {
+            let name = names.get(e.0).unwrap().to_string();
+            let val = e.1.len() as u64;
+            cols.insert(name, val);
+        });
 
         let stat = TableStats {
             rows,
