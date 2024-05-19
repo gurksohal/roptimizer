@@ -8,7 +8,7 @@ pub struct Graph {
     pub table_names: HashMap<String, String>
 }
 
-#[derive(Debug, Eq, Hash, PartialEq)]
+#[derive(Debug, Eq, Hash, PartialEq, Clone)]
 pub struct Edge {
     pub node1: String,
     pub node2: String,
