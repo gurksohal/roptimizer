@@ -6,7 +6,6 @@ use datafusion::prelude::{ParquetReadOptions, SessionContext};
 
 use crate::join_order::query_graph::build_query_graph;
 
-mod catalog;
 mod join_order;
 
 #[tokio::main]

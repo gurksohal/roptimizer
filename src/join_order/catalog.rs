@@ -11,7 +11,7 @@ pub struct TableStats {
 
 #[derive(Debug)]
 pub struct Catalog {
-    stats: HashMap<String, TableStats>
+    pub(crate) stats: HashMap<String, TableStats>
 }
 
 impl Catalog {
@@ -23,5 +23,13 @@ impl Catalog {
         Ok(Catalog {
             stats: map
         })
+    }
+    
+    pub fn get_rows(&self, table: &str) -> u64 {
+        self.stats.get(table).unwrap().rows
+    }
+    
+    pub fn get_col_stats(&self, table: &str, col: &str) -> u64 {
+        self.stats.get(table).unwrap().cols.get(col).unwrap().to_owned()
     }
 }

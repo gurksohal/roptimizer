@@ -15,6 +15,17 @@ pub struct Edge {
     pub col1: String,
     pub col2: String,
 }
+
+impl Graph {
+    pub fn table_name(&self, name: &str) -> String {
+        if self.table_names.contains_key(name) {
+            return self.table_names.get(name).unwrap().to_string();
+        }
+        
+        name.to_string()
+    }    
+}
+
 pub fn build_query_graph(plan: &LogicalPlan) -> Graph {
     // map table alias name to real table name
     let table_names: HashMap<String, String> = get_table_names(plan);
