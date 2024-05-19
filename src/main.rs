@@ -4,14 +4,19 @@ use std::path::Path;
 use datafusion::logical_expr::LogicalPlan;
 use datafusion::prelude::{ParquetReadOptions, SessionContext};
 
+use crate::join_order::query_graph::build_query_graph;
+
 mod catalog;
+mod join_order;
 
 #[tokio::main]
 async fn main() {
     let ctx = SessionContext::new();
     load_job_data(&ctx).await;
     let plan = get_df_plan(&ctx, "1a").await;
-    println!("{}", verify_plan(&plan));
+    if !verify_plan(&plan) { panic!("Unexpected plan") };
+
+    build_query_graph(&plan);
 }
 
 async fn load_job_data(ctx: &SessionContext) {
@@ -26,6 +31,7 @@ async fn load_job_data(ctx: &SessionContext) {
     }
 }
 
+// Get plan for a given JOB query
 async fn get_df_plan(ctx: &SessionContext, query: &str) -> LogicalPlan {
     let queries_path = format!("C:/Users/G/Desktop/jobdata/query/{}.sql", query);
     let query_str = fs::read_to_string(queries_path).unwrap();
