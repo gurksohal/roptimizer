@@ -1,4 +1,6 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
+use std::ops::Sub;
+
 use datafusion::logical_expr::{BinaryExpr, Expr, LogicalPlan, Operator};
 
 #[derive(Debug)]
@@ -23,7 +25,140 @@ impl Graph {
         }
         
         name.to_string()
-    }    
+    }
+    
+    pub fn csg_cmp_pairs(&self) -> Vec<(BTreeSet<String>, BTreeSet<String>)> {
+        let order = assign_ordering(self);
+        let subsets: Vec<BTreeSet<String>> = self.enumerate_csg(&order);
+        let mut res = vec![];
+        for subset in &subsets {
+            let t = self.enumerate_cmp(subset, &order);
+            for temp in t {
+                res.push((subset.clone(), temp));
+            }
+        }
+        
+        res
+    }
+
+    fn enumerate_csg(&self, order: &HashMap<u32, &String>) -> Vec<BTreeSet<String>> {
+        let mut subsets: Vec<BTreeSet<String>> = vec![];
+        for i in (0..order.len()).rev() {
+            let index = i as u32;
+            let start = BTreeSet::from([order.get(&index).unwrap().to_string()]);
+            subsets.push(start.clone());
+            let x = BTreeSet::new();
+            for e in self.enumerate_csg_rec(start, x, &order) {
+                subsets.push(e);
+            }
+        }
+        
+        subsets
+    }
+    
+    fn enumerate_cmp(&self, subset: &BTreeSet<String>, order: &HashMap<u32, &String>) -> Vec<BTreeSet<String>> {
+        // find min in subset
+        let mut res = vec![];
+        let mut min = order.len();
+        for i in 0..order.len() {
+            if subset.contains(order.get(&(i as u32)).unwrap().as_str()) {
+                min = min.min(i);
+            }
+        }
+        
+        let mut exclude = BTreeSet::new();
+        for i in 0..=min {
+            exclude.insert(order.get(&(i as u32)).unwrap().to_string());
+        }
+        
+        exclude = exclude.union(subset).cloned().collect();
+        let n = self.neighbourhood(subset).sub(&exclude);
+        
+        for i in 0..order.len() {
+            let node = order.get(&(i as u32)).unwrap().to_string();
+            if n.contains(&node) {
+                let start = BTreeSet::from([node]);
+                res.push(start.clone());
+                let ex = exclude.union(&n).cloned().collect();
+                for e in self.enumerate_csg_rec(start, ex, &order) {
+                    res.push(e);
+                }
+            }
+        }
+        
+        res
+    }
+
+    fn enumerate_csg_rec(&self, set: BTreeSet<String>, exclusion: BTreeSet<String>, order: &HashMap<u32, &String>) -> Vec<BTreeSet<String>> {
+        let mut subsets: Vec<BTreeSet<String>> = vec![];
+        let n: BTreeSet<String> = self.neighbourhood(&set).sub(&exclusion);
+        
+        let n_subsets: Vec<Vec<String>> = Self::sorted_subsets(&n, order);
+        for s_prime in &n_subsets {
+            let s_prime_set: BTreeSet<String> = BTreeSet::from_iter(s_prime.iter().cloned());
+            let final_set: BTreeSet<String> = s_prime_set.union(&set).cloned().collect();
+            subsets.push(final_set);
+        }
+        
+        for s_prime in &n_subsets {
+            let s_prime_set: BTreeSet<String> = BTreeSet::from_iter(s_prime.iter().cloned());
+            let next_set: BTreeSet<String> = s_prime_set.union(&set).cloned().collect();
+            let exclude: BTreeSet<String> = exclusion.union(&n).cloned().collect();
+            self.enumerate_csg_rec(next_set, exclude, order);
+        }
+        subsets
+    }
+
+    fn neighbourhood(&self, set: &BTreeSet<String>) -> BTreeSet<String> {
+        let mut res = BTreeSet::new();
+        for node in set {
+            res.extend(self.neighbourhood_single_node(node))
+        }
+
+        res = res.difference(set).cloned().collect();
+        res
+    }
+
+    fn neighbourhood_single_node(&self, node: &String) -> BTreeSet<String> {
+        let mut res = BTreeSet::new();
+        for edge in &self.edges {
+            if &edge.node1 == node || &edge.node2 == node {
+                let mut add = edge.node1.clone();
+                if &add == node {
+                    add.clone_from(&edge.node2);
+                }
+                res.insert(add);
+            }
+        }
+        
+        println!("n for {}: {:?}", node, res);
+        res
+    }
+
+    fn sorted_subsets(set: &BTreeSet<String>, order: &HashMap<u32, &String>) -> Vec<Vec<String>> {
+        let mut res: Vec<Vec<String>> = vec![];
+        let mut sorted_set = vec![];
+        for i in 0..order.len() {
+            let key = order.get(&(i as u32)).unwrap();
+            if set.contains(key.as_str()) {
+                sorted_set.push(key.as_str())
+            }
+        }
+        
+        let mut curr = vec![];
+        Self::sorted_subsets_rec(&sorted_set, &mut res, &mut curr, 0);
+        res
+    }
+    
+    fn sorted_subsets_rec(set: &Vec<&str>, res: &mut Vec<Vec<String>>, curr: &mut Vec<String>, index: usize) {
+        res.push(curr.clone());
+        
+        for i in index..set.len() {
+            curr.push(set.get(i).unwrap().to_string());
+            Self::sorted_subsets_rec(set, res, curr, i+1);
+            curr.remove(curr.len() - 1);
+        }
+    }
 }
 
 pub fn build_query_graph(plan: &LogicalPlan) -> Graph {
@@ -136,4 +271,50 @@ fn find_filter_node(node: &LogicalPlan) -> Option<&LogicalPlan> {
     }
 
     node.inputs().iter().find_map(|e| find_filter_node(e))
+}
+
+fn assign_ordering(graph: &Graph) -> HashMap<u32, &String> {
+    let mut map = HashMap::new();
+    let root = graph
+        .nodes
+        .iter()
+        .next()
+        .expect("unable to assign a root in query graph");
+    let mut seen = HashSet::new();
+    let mut q = VecDeque::new();
+
+    q.push_back(root);
+    seen.insert(root);
+    let mut i: u32 = 0;
+    while !q.is_empty() {
+        let curr = q.pop_front().unwrap();
+        map.insert(i, curr);
+        i += 1;
+        for edge in get_edges(graph, curr) {
+            let mut child = &edge.node1;
+            if child == curr {
+                child = &edge.node2;
+            }
+
+            if seen.contains(child) {
+                continue;
+            }
+
+            q.push_back(child);
+            seen.insert(child);
+        }
+    }
+
+    map
+}
+
+fn get_edges<'a>(graph: &'a Graph, node: &str) -> Vec<&'a Edge> {
+    let mut res = vec![];
+    for edge in &graph.edges {
+        if edge.node1 == node || edge.node2 == node {
+            res.push(edge);
+        }
+    }
+
+    res
 }

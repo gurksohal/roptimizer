@@ -4,6 +4,7 @@ use std::path::Path;
 use datafusion::logical_expr::LogicalPlan;
 use datafusion::prelude::{ParquetReadOptions, SessionContext};
 
+use crate::join_order::dp::JoinOrderOpt;
 use crate::join_order::query_graph::build_query_graph;
 
 mod join_order;
@@ -15,7 +16,9 @@ async fn main() {
     let plan = get_df_plan(&ctx, "1a").await;
     if !verify_plan(&plan) { panic!("Unexpected plan") };
 
-    build_query_graph(&plan);
+    let graph = build_query_graph(&plan);
+    let mut opt = JoinOrderOpt::build(&graph);
+    opt.join_order();
 }
 
 async fn load_job_data(ctx: &SessionContext) {
