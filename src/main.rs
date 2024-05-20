@@ -1,3 +1,4 @@
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
@@ -5,7 +6,7 @@ use datafusion::logical_expr::LogicalPlan;
 use datafusion::prelude::{ParquetReadOptions, SessionContext};
 
 use crate::join_order::dp::JoinOrderOpt;
-use crate::join_order::query_graph::build_query_graph;
+use crate::join_order::query_graph::{Edge, Graph, QueryGraph};
 
 mod join_order;
 
@@ -16,9 +17,54 @@ async fn main() {
     let plan = get_df_plan(&ctx, "1a").await;
     if !verify_plan(&plan) { panic!("Unexpected plan") };
 
-    let graph = build_query_graph(&plan);
+    let graph = QueryGraph::build_query_graph(&plan);
+    //println!("new_Graph: {qgraph:?}");
+    //let graph = build_graph();
+    //let graph = QueryGraph::from_graph(&graph);
     let mut opt = JoinOrderOpt::build(&graph);
     opt.join_order();
+}
+
+fn build_graph() -> Graph {
+    let nodes = BTreeSet::from(["R0".to_string(), "R1".to_string(), "R2".to_string(), "R3".to_string(), "R4".to_string()]);
+    let edges = HashSet::from([
+        Edge {
+            node1: "R0".to_owned(),
+            node2: "R1".to_string(),
+            col1: "B".to_owned(),
+            col2: "B".to_owned(),
+        },
+        Edge {
+            node1: "R0".to_owned(),
+            node2: "R2".to_string(),
+            col1: "B".to_owned(),
+            col2: "B".to_owned(),
+        },
+        Edge {
+            node1: "R0".to_owned(),
+            node2: "R3".to_string(),
+            col1: "B".to_owned(),
+            col2: "B".to_owned(),
+        },
+        Edge {
+            node1: "R3".to_owned(),
+            node2: "R2".to_string(),
+            col1: "B".to_owned(),
+            col2: "B".to_owned(),
+        },
+        Edge {
+            node1: "R2".to_owned(),
+            node2: "R4".to_string(),
+            col1: "B".to_owned(),
+            col2: "B".to_owned(),
+        },
+    ]);
+    
+    Graph {
+        nodes,
+        edges,
+        table_names: HashMap::new()
+    }
 }
 
 async fn load_job_data(ctx: &SessionContext) {

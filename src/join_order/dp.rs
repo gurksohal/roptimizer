@@ -4,6 +4,7 @@ use std::ops::Deref;
 
 use crate::join_order::catalog::Catalog;
 use crate::join_order::cost_estimator::CostEstimator;
+use crate::join_order::query_graph::QueryGraph;
 use crate::join_order::query_graph::{Edge, Graph};
 
 #[derive(Debug, Hash, Eq, PartialEq, Clone)]
@@ -127,14 +128,14 @@ impl Display for JoinTree {
 }
 
 pub struct JoinOrderOpt<'a> {
-    graph: &'a Graph,
+    graph: &'a QueryGraph,
     cost_estimator: CostEstimator,
     costs: HashMap<JoinTree, u64>
 }
 
 impl<'a> JoinOrderOpt<'a> {
     
-    pub fn build(graph: &Graph) -> JoinOrderOpt {
+    pub fn build(graph: &QueryGraph) -> JoinOrderOpt {
         let est = CostEstimator { catalog: Catalog::build().unwrap() };
         JoinOrderOpt {
             graph,
@@ -147,18 +148,18 @@ impl<'a> JoinOrderOpt<'a> {
         let mut best_plan: HashMap<BTreeSet<String>, JoinTree> = HashMap::new();
 
         for node in &self.graph.nodes {
-            let join_tree = JoinTree::create_single_node(node.to_string());
+            let join_tree = JoinTree::create_single_node(node.name.to_string());
             self.cost(&join_tree);
             best_plan.insert(join_tree.to_set(), join_tree);
         }
         
         for (s1, s2) in self.graph.csg_cmp_pairs() {
             let s = s1.union(&s2).cloned().collect();
-        
+            println!("{s1:?} AND {s2:?}");
             let p1 = best_plan.get(&s1).expect("unable to find plan for s1").clone();
             let p2 = best_plan.get(&s2).expect("unable to find plan for s2").clone();
             let mut curr_plan = p1.join(&p2);
-            let mut curr_best = best_plan.get(&s).unwrap_or_else(|| &curr_plan).clone();
+            let mut curr_best = best_plan.get(&s).unwrap_or(&curr_plan).clone();
             if !best_plan.contains_key(&curr_best.to_set()) || self.cost(&curr_best) > self.cost(&curr_plan) {
                 best_plan.insert(s.clone(), curr_plan.clone());
                 curr_best = curr_plan;
@@ -170,7 +171,12 @@ impl<'a> JoinOrderOpt<'a> {
             }
         }
 
-        println!("{best_plan:?}");
+        let mut key = BTreeSet::new();
+        for node in &self.graph.nodes {
+            key.insert(node.name.to_string());
+        }
+        //println!("{best_plan:?}");
+        println!("{:?}", best_plan.get(&key).unwrap());
     }
     
     fn cost(&mut self, tree: &JoinTree) -> u64 {
@@ -230,7 +236,7 @@ fn edge_in_set(join_set: &BTreeSet<String>, edge: &Edge) -> bool {
 
 #[cfg(test)]
 mod test {
-    use std::collections::{HashMap, HashSet};
+    use std::collections::{BTreeSet, HashMap, HashSet};
 
     use crate::join_order::catalog::{Catalog, TableStats};
     use crate::join_order::cost_estimator::CostEstimator;
@@ -264,7 +270,7 @@ mod test {
     }
 
     fn setup_graph() -> Graph {
-        let nodes = HashSet::from(["R".to_string(), "S".to_string(), "T".to_string()]);
+        let nodes = BTreeSet::from(["R".to_string(), "S".to_string(), "T".to_string()]);
         let edges = HashSet::from([
             Edge {
                 node1: "R".to_owned(),
