@@ -10,7 +10,7 @@ pub struct QueryGraph {
 }
 
 #[derive(Debug)]
-pub struct Graph {
+struct Graph {
     pub nodes: BTreeSet<String>,
     pub edges: HashSet<Edge>,
     pub table_names: HashMap<String, String>,
@@ -49,7 +49,7 @@ impl QueryGraph {
         QueryGraph::from_graph(&g)
     }
 
-    pub fn from_graph(graph: &Graph) -> QueryGraph {
+    fn from_graph(graph: &Graph) -> QueryGraph {
         QueryGraph {
             nodes: assign_ordering(graph),
             edges: graph.edges.clone(),
@@ -76,8 +76,7 @@ impl QueryGraph {
                 res.push((string_subset.clone(), string_temp));
             }
         }
-
-        println!("{subsets:?}");
+        
         res
     }
 
@@ -248,7 +247,7 @@ fn walk_expr<'a>(binary_expr: &'a BinaryExpr, vec: &mut Vec<&'a BinaryExpr>) {
     let left = &*binary_expr.left;
     let right = &*binary_expr.right;
 
-    if binary_expr.op == Operator::Or {
+    if binary_expr.op != Operator::And {
         vec.push(binary_expr);
         return;
     }
