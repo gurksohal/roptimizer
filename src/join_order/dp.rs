@@ -1,6 +1,5 @@
 use std::collections::{BTreeSet, HashMap};
 use std::fmt::{Display, Formatter};
-use std::ops::Deref;
 
 use crate::join_order::catalog::Catalog;
 use crate::join_order::cost_estimator::CostEstimator;
@@ -18,6 +17,7 @@ pub struct JoinTree {
     pub left: Option<Box<JoinNode>>,
     pub right: Option<Box<JoinNode>>,
     pub size: u32,
+    pub edges: Vec<Edge>,
 }
 
 impl JoinNode {
@@ -33,7 +33,12 @@ impl JoinTree {
         let left = Some(Box::new(JoinNode::Single(node)));
         let right = None;
         let size = 1;
-        JoinTree { left, right, size }
+        JoinTree {
+            left,
+            right,
+            size,
+            edges: vec![],
+        }
     }
 
     pub fn from_join_node(join_node: &JoinNode) -> JoinTree {
@@ -62,7 +67,7 @@ impl JoinTree {
         set
     }
 
-    fn join(&self, other: &JoinTree) -> JoinTree {
+    pub fn join(&self, other: &JoinTree, edges: Vec<Edge>) -> JoinTree {
         let size = self.size + other.size;
         let left = self.clone();
         let right = other.clone();
@@ -71,6 +76,7 @@ impl JoinTree {
             left: Some(Box::new(JoinNode::Tree(left))),
             right: Some(Box::new(JoinNode::Tree(right))),
             size,
+            edges,
         }
     }
 }
@@ -105,11 +111,16 @@ impl Display for JoinTree {
             return write!(f, "{}", r);
         }
 
+        let mut s = String::new();
+        self.edges.iter().for_each(|e| {
+            s = format!("{} {} ", s, e);
+        });
         write!(
             f,
-            "({} ⋈ {})",
+            "({} ⋈ {} ({}))",
             self.left.as_ref().unwrap(),
-            self.right.as_ref().unwrap()
+            self.right.as_ref().unwrap(),
+            s
         )
     }
 }
@@ -131,7 +142,7 @@ impl<'a> JoinOrderOpt<'a> {
             cost_estimator: est,
         }
     }
-    
+
     pub fn join_order(&mut self) -> JoinTree {
         // hashset doesn't impl 'hash', use BTreeSet instead
         let mut best_plan: HashMap<BTreeSet<String>, JoinTree> = HashMap::new();
@@ -155,9 +166,10 @@ impl<'a> JoinOrderOpt<'a> {
                 .expect("unable to find plan for s2")
                 .clone();
 
-            let mut curr_plan = p1.join(&p2);
+            let connecting_edges = self.connecting_edges(&p1, &p2);
+            let mut curr_plan = p1.join(&p2, connecting_edges.clone());
             let mut curr_best = best_plan.get(&s).unwrap_or(&curr_plan).clone();
-            
+
             if !best_plan.contains_key(&curr_best.to_set())
                 || self.cost(&curr_best) > self.cost(&curr_plan)
             {
@@ -165,7 +177,7 @@ impl<'a> JoinOrderOpt<'a> {
                 curr_best = curr_plan;
             }
 
-            curr_plan = p2.join(&p1);
+            curr_plan = p2.join(&p1, connecting_edges);
             if self.cost(&curr_best) > self.cost(&curr_plan) {
                 best_plan.insert(s, curr_plan);
             }
@@ -175,72 +187,38 @@ impl<'a> JoinOrderOpt<'a> {
         for node in &self.graph.nodes {
             key.insert(node.name.to_string());
         }
-        
+
         best_plan.get(&key).unwrap().to_owned()
     }
 
-    fn cost(&mut self, tree: &JoinTree) -> u64 {
-        if self.costs.contains_key(tree) {
-            return self.costs.get(tree).unwrap().to_owned();
-        }
+    // Get edges, which connect some node from left tree, to some node in right tree
+    fn connecting_edges(&self, p1: &JoinTree, p2: &JoinTree) -> Vec<Edge> {
+        let left_set = p1.to_set();
+        let right_set = p2.to_set();
+        let edges: Vec<Edge> = self
+            .graph
+            .edges
+            .iter()
+            .filter_map(|edge| {
+                if p1.edges.contains(edge) || p2.edges.contains(edge) {
+                    return None;
+                }
 
-        if tree.size == 1 {
-            let r = if let JoinNode::Single(s) = tree.left.as_ref().unwrap().deref() {
-                s
-            } else {
-                panic!("left isn't the single relation");
-            };
-            if tree.right.is_some() {
-                panic!("right should be none");
-            } 
-            
-            let r = self.graph.table_name(r);
-            let cost = self.cost_estimator.table_size(&r);
-            self.costs.insert(tree.to_owned(), cost);
-            return cost;
-        }
+                let is_connecting = edge_in_set(&left_set, edge) && edge_in_set(&right_set, edge);
+                if is_connecting {
+                    return Some(edge.clone());
+                }
 
-        // find what edges connect left, and right
-        let mut valid_edges: Vec<&Edge> = vec![];
-        let left_set = tree.left.as_ref().unwrap().to_set();
-        let right_set = tree.right.as_ref().unwrap().to_set();
-        for edge in &self.graph.edges {
-            if edge_in_set(&left_set, edge) && edge_in_set(&right_set, edge) {
-                valid_edges.push(edge);
-            }
-        }
-
-        // update edges to use non alias names
-        let valid_edges: Vec<Edge> = valid_edges
-            .iter_mut()
-            .map(|e| Edge {
-                node1: self.graph.table_name(&e.node1),
-                node2: self.graph.table_name(&e.node2),
-                ..e.clone()
+                None
             })
             .collect();
 
-        let left_tree = JoinTree::from_join_node(tree.left.as_ref().unwrap());
-        let right_tree = JoinTree::from_join_node(tree.right.as_ref().unwrap());
+        edges
+    }
 
-        let left_cost = self
-            .costs
-            .get(&left_tree)
-            .expect("no cost for left plan")
-            .to_owned();
-        
-        let right_cost = self
-            .costs
-            .get(&right_tree)
-            .expect("no cost for right plan")
-            .to_owned();
-
-        let cost: u64 = self
-            .cost_estimator
-            .est_cost(left_cost, right_cost, valid_edges);
-        
-        self.costs.insert(tree.to_owned(), cost);
-        cost
+    fn cost(&self, join_tree: &JoinTree) -> u64 {
+        self.cost_estimator
+            .est_cost(join_tree, &self.graph.table_names)
     }
 }
 
@@ -248,5 +226,6 @@ fn edge_in_set(join_set: &BTreeSet<String>, edge: &Edge) -> bool {
     let left = &edge.node1;
     let right = &edge.node2;
 
-    join_set.contains(left) || join_set.contains(right)
+    join_set.contains(left)
+        || join_set.contains(right) && !(join_set.contains(left) && join_set.contains(right))
 }

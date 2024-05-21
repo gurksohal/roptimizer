@@ -1,6 +1,8 @@
-use datafusion::logical_expr::{BinaryExpr, Expr, LogicalPlan, Operator};
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
+use std::fmt::{Display, Formatter};
 use std::ops::Sub;
+
+use datafusion::logical_expr::{BinaryExpr, Expr, LogicalPlan, Operator};
 
 #[derive(Debug)]
 pub struct QueryGraph {
@@ -28,6 +30,16 @@ pub struct Edge {
     pub node2: String,
     pub col1: String,
     pub col2: String,
+}
+
+impl Display for Edge {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}.{} = {}.{}",
+            self.node1, self.col1, self.node2, self.col2
+        )
+    }
 }
 
 impl QueryGraph {
@@ -76,7 +88,7 @@ impl QueryGraph {
                 res.push((string_subset.clone(), string_temp));
             }
         }
-        
+
         res
     }
 
@@ -172,13 +184,13 @@ impl QueryGraph {
                     .iter()
                     .find(|rel| rel.name == edge.node1)
                     .expect("cant find relation in nodes");
-                
+
                 let r2 = self
                     .nodes
                     .iter()
                     .find(|rel| rel.name == edge.node2)
                     .expect("cant find relation in nodes");
-                
+
                 res.insert(r1);
                 res.insert(r2);
             }
@@ -204,10 +216,10 @@ fn build_graph(table_names: HashMap<String, String>, join_predicates: Vec<&Binar
                 let t2_name = c2.relation.as_ref().unwrap().table().to_owned();
                 let c1_name = c1.name.to_string();
                 let c2_name = c2.name.to_string();
-                
+
                 nodes.insert(t1_name.to_string());
                 nodes.insert(t2_name.to_string());
-                
+
                 edges.insert(Edge {
                     node1: t1_name,
                     node2: t2_name,
@@ -215,11 +227,11 @@ fn build_graph(table_names: HashMap<String, String>, join_predicates: Vec<&Binar
                     col2: c2_name,
                 });
             }
-            
+
             (_, _) => panic!("error join predicate where both sides aren't cols"),
         }
     }
-    
+
     Graph {
         nodes,
         edges,
@@ -345,7 +357,7 @@ fn assign_ordering(graph: &Graph) -> Vec<Relation> {
             name: curr.to_string(),
             id: i,
         });
-        
+
         i += 1;
         for edge in get_edges(graph, curr) {
             let mut child = &edge.node1;

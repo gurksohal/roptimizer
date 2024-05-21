@@ -3,21 +3,24 @@ use std::sync::Arc;
 
 use datafusion::common::JoinConstraint;
 use datafusion::common::JoinType::Inner;
-use datafusion::logical_expr::{Aggregate, BinaryExpr, Expr, Filter, Join, Limit, LogicalPlan, Projection};
+use datafusion::logical_expr::{
+    Aggregate, BinaryExpr, Expr, Filter, Join, Limit, LogicalPlan, Projection,
+};
+use datafusion::prelude::Column;
 
 use crate::join_order::dp::{JoinNode, JoinOrderOpt, JoinTree};
-use crate::join_order::query_graph::{leaf_binary_expr, QueryGraph};
+use crate::join_order::query_graph::{Edge, leaf_binary_expr, QueryGraph};
 
 mod join_order;
 pub fn optimize(plan: &LogicalPlan) -> LogicalPlan {
     if !verify_plan(plan) {
         panic!("Unexpected plan")
     };
-    
+
     let graph = QueryGraph::build_query_graph(plan);
     let mut opt = JoinOrderOpt::build(&graph);
     let optimized_join_tree = opt.join_order();
-
+    println!("{}", optimized_join_tree);
     let new_df_plan = create_df_plan(optimized_join_tree, plan);
     copy_and_merge_plan(plan, &new_df_plan).unwrap()
 }
@@ -42,17 +45,18 @@ fn create_df_plan(join_tree: JoinTree, df_plan: &LogicalPlan) -> LogicalPlan {
 
     let left_plan = create_df_plan(left_tree.to_owned(), df_plan);
     let right_plan = create_df_plan(right_tree.to_owned(), df_plan);
-
+    let exprs: Vec<(Expr, Expr)> = join_tree.edges.iter().map(edge_to_expr).collect();
     let join = Join {
         left: Arc::new(left_plan.to_owned()),
         right: Arc::new(right_plan.to_owned()),
-        on: get_join_expr(df_plan, &left_tree, &right_tree),
+        on: exprs,
         filter: None,
         join_type: Inner,
         join_constraint: JoinConstraint::On,
         schema: Arc::new(
             left_plan
                 .schema()
+                .clone()
                 .join(right_plan.schema())
                 .expect("error in joining schemas"),
         ),
@@ -62,35 +66,17 @@ fn create_df_plan(join_tree: JoinTree, df_plan: &LogicalPlan) -> LogicalPlan {
     LogicalPlan::Join(join)
 }
 
-fn get_join_expr(
-    df_plan: &LogicalPlan,
-    left_tree: &JoinTree,
-    right_tree: &JoinTree,
-) -> Vec<(Expr, Expr)> {
-    let left_set = left_tree.to_set();
-    let right_set = right_tree.to_set();
-    let join_predicates = get_join_predicates(df_plan);
-    let mut res = vec![];
+fn edge_to_expr(edge: &Edge) -> (Expr, Expr) {
+    let left_col = Expr::Column(Column::new(
+        Some(edge.node1.to_string()),
+        edge.col1.to_string(),
+    ));
+    let right_col = Expr::Column(Column::new(
+        Some(edge.node2.to_string()),
+        edge.col2.to_string(),
+    ));
 
-    for join_pred in join_predicates {
-        match (&*join_pred.left, &*join_pred.right) {
-            (Expr::Column(c1), Expr::Column(c2)) => {
-                let table1 = c1.relation.as_ref().unwrap().table().to_owned();
-                let table2 = c2.relation.as_ref().unwrap().table().to_owned();
-
-                if left_set.contains(&table1) && right_set.contains(&table2)
-                    || left_set.contains(&table2) && right_set.contains(&table1)
-                {
-                    res.push((*join_pred.left.to_owned(), *join_pred.right.to_owned()));
-                }
-            }
-            _ => {
-                panic!("not a col expr")
-            }
-        }
-    }
-
-    res
+    (left_col, right_col)
 }
 
 fn get_join_predicates(plan: &LogicalPlan) -> Vec<&BinaryExpr> {
@@ -191,11 +177,18 @@ fn remove_join_predicates(plan: &LogicalPlan) -> Expr {
 
         v.push(e);
     }
-    let v: Vec<Expr> = v.iter().map(|e| Expr::BinaryExpr(e.to_owned().to_owned())).collect();
+    let v: Vec<Expr> = v
+        .iter()
+        .map(|e| Expr::BinaryExpr(e.to_owned().to_owned()))
+        .collect();
 
     assert!(!v.is_empty());
     let first = v.first().unwrap().to_owned();
-    let first = if let Expr::BinaryExpr(e) = first { e } else {panic!("not binary")};
+    let first = if let Expr::BinaryExpr(e) = first {
+        e
+    } else {
+        panic!("not binary")
+    };
     let mut root = Expr::BinaryExpr(first);
 
     for i in 1..v.len() {
