@@ -227,7 +227,7 @@ fn build_graph(table_names: HashMap<String, String>, join_predicates: Vec<&Binar
     }
 }
 
-fn leaf_binary_expr(plan: &LogicalPlan) -> Vec<&BinaryExpr> {
+pub fn leaf_binary_expr(plan: &LogicalPlan) -> Vec<&BinaryExpr> {
     let filter_node = find_filter_node(plan);
     let node = match filter_node {
         Some(LogicalPlan::Filter(filter)) => filter,

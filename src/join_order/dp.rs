@@ -8,20 +8,20 @@ use crate::join_order::query_graph::Edge;
 use crate::join_order::query_graph::QueryGraph;
 
 #[derive(Debug, Hash, Eq, PartialEq, Clone)]
-enum JoinNode {
+pub enum JoinNode {
     Tree(JoinTree),
     Single(String),
 }
 
 #[derive(Debug, Hash, Eq, PartialEq, Clone)]
-struct JoinTree {
-    left: Option<Box<JoinNode>>,
-    right: Option<Box<JoinNode>>,
-    size: u32,
+pub struct JoinTree {
+    pub left: Option<Box<JoinNode>>,
+    pub right: Option<Box<JoinNode>>,
+    pub size: u32,
 }
 
 impl JoinNode {
-    fn to_set(&self) -> BTreeSet<String> {
+    pub fn to_set(&self) -> BTreeSet<String> {
         match self {
             JoinNode::Tree(t) => t.to_set(),
             JoinNode::Single(s) => BTreeSet::from([s.to_owned()]),
@@ -36,14 +36,14 @@ impl JoinTree {
         JoinTree { left, right, size }
     }
 
-    fn from_join_node(join_node: &JoinNode) -> JoinTree {
+    pub fn from_join_node(join_node: &JoinNode) -> JoinTree {
         match join_node {
             JoinNode::Tree(tree) => tree.clone(),
             JoinNode::Single(single) => Self::create_single_node(single.to_string()),
         }
     }
 
-    fn to_set(&self) -> BTreeSet<String> {
+    pub fn to_set(&self) -> BTreeSet<String> {
         let mut set = BTreeSet::new();
         if self.left.is_some() {
             set = set
@@ -131,7 +131,8 @@ impl<'a> JoinOrderOpt<'a> {
             cost_estimator: est,
         }
     }
-    pub fn join_order(&mut self) {
+    
+    pub fn join_order(&mut self) -> JoinTree {
         // hashset doesn't impl 'hash', use BTreeSet instead
         let mut best_plan: HashMap<BTreeSet<String>, JoinTree> = HashMap::new();
 
@@ -174,7 +175,8 @@ impl<'a> JoinOrderOpt<'a> {
         for node in &self.graph.nodes {
             key.insert(node.name.to_string());
         }
-        println!("{}", best_plan.get(&key).unwrap());
+        
+        best_plan.get(&key).unwrap().to_owned()
     }
 
     fn cost(&mut self, tree: &JoinTree) -> u64 {
@@ -188,6 +190,10 @@ impl<'a> JoinOrderOpt<'a> {
             } else {
                 panic!("left isn't the single relation");
             };
+            if tree.right.is_some() {
+                panic!("right should be none");
+            } 
+            
             let r = self.graph.table_name(r);
             let cost = self.cost_estimator.table_size(&r);
             self.costs.insert(tree.to_owned(), cost);
