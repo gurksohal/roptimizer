@@ -17,10 +17,17 @@ impl CostEstimator {
         let left_tree = JoinTree::from_join_node(tree.left.as_ref().unwrap());
         let right_tree = JoinTree::from_join_node(tree.right.as_ref().unwrap());
 
-        let left_cost = self.est_cost(&left_tree, table_names);
+        let mut left_cost = self.est_cost(&left_tree, table_names);
         let right_cost = self.est_cost(&right_tree, table_names);
         let curr_card = self.get_card(tree, table_names);
 
+        let left_card = self.get_card(&left_tree, table_names);
+        let right_card = self.get_card(&right_tree, table_names);
+        // assume hash join, prefer plans with a smaller left side
+        if left_card > right_card {
+            left_cost += left_card - right_card;
+        }
+        
         left_cost + right_cost + curr_card
     }
 

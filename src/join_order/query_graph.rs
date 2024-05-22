@@ -4,7 +4,7 @@ use std::ops::Sub;
 
 use datafusion::logical_expr::{BinaryExpr, Expr, LogicalPlan, Operator};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct QueryGraph {
     pub nodes: Vec<Relation>,
     pub edges: HashSet<Edge>,

@@ -1,11 +1,10 @@
+use std::collections::HashMap;
 use std::ops::Deref;
 use std::sync::Arc;
 
 use datafusion::common::JoinConstraint;
 use datafusion::common::JoinType::Inner;
-use datafusion::logical_expr::{
-    Aggregate, BinaryExpr, Expr, Filter, Join, Limit, LogicalPlan, Projection,
-};
+use datafusion::logical_expr::{Aggregate, BinaryExpr, build_join_schema, Expr, Filter, Join, Limit, LogicalPlan, Projection, SubqueryAlias, TableScan};
 use datafusion::prelude::Column;
 
 use crate::join_order::catalog::Catalog;
@@ -19,9 +18,8 @@ pub fn optimize_df(plan: &LogicalPlan) -> LogicalPlan {
     
     let catalog = Catalog::build().unwrap();
     let graph = QueryGraph::build_query_graph(plan);
-    let optimized_join_tree = optimize(graph, catalog);
-    println!("{}", optimized_join_tree);
-    let new_df_plan = create_df_plan(optimized_join_tree, plan);
+    let optimized_join_tree = optimize(graph.clone(), catalog);
+    let new_df_plan = join_tree_to_df(optimized_join_tree, plan, &graph);
     copy_and_merge_plan(plan, &new_df_plan).unwrap()
 }
 
@@ -30,27 +28,37 @@ fn optimize(query_graph: QueryGraph, catalog: Catalog) -> JoinTree {
     opt.join_order()
 }
 
-fn create_df_plan(join_tree: JoinTree, df_plan: &LogicalPlan) -> LogicalPlan {
+fn join_tree_to_df(join_tree: JoinTree, df_plan: &LogicalPlan, graph: &QueryGraph) -> LogicalPlan {
     if join_tree.size == 1 {
-        let join_node = join_tree.left.expect("left is empty");
-        assert!(join_tree.right.is_none(), "right should be none");
-        let table_name = if let JoinNode::Single(s) = join_node.deref() {
+        assert!(join_tree.right.is_none(), "tree size is 1, and right is none");
+        let join_node = join_tree.left.unwrap();
+        let t_name = if let JoinNode::Single(s) = join_node.deref() {
             s
         } else {
             panic!("left should be of single join node type");
         };
-
-        return get_logical_scan_node(df_plan, table_name)
-            .unwrap()
-            .to_owned();
+        
+        let full_name = table_name(&graph.table_names, t_name);
+        let scan_node = get_logical_scan_node(df_plan, &full_name)
+            .unwrap();
+        
+        let scan_node = LogicalPlan::TableScan(TableScan::try_new(scan_node.table_name.clone(), scan_node.source.clone(), scan_node.projection.clone(), scan_node.filters.clone(), scan_node.fetch.clone()).unwrap());
+        
+        if &full_name == t_name {
+            return scan_node;
+        }
+        
+       return LogicalPlan::SubqueryAlias(SubqueryAlias::try_new(Arc::from(scan_node), t_name).unwrap());
     }
 
     let left_tree = JoinTree::from_join_node(&join_tree.left.expect("left was empty"));
     let right_tree = JoinTree::from_join_node(&join_tree.right.expect("right was empty"));
+    let exprs: Vec<(Expr, Expr)> = join_tree.edges.iter().map(edge_to_expr).map(|e| reorder_expr_tuple(e, &left_tree, &right_tree)).collect();
 
-    let left_plan = create_df_plan(left_tree.to_owned(), df_plan);
-    let right_plan = create_df_plan(right_tree.to_owned(), df_plan);
-    let exprs: Vec<(Expr, Expr)> = join_tree.edges.iter().map(edge_to_expr).collect();
+    let left_plan = join_tree_to_df(left_tree.to_owned(), df_plan, graph);
+    let right_plan = join_tree_to_df(right_tree.to_owned(), df_plan, graph);
+    
+    let schema = build_join_schema(left_plan.schema(), right_plan.schema(), &Inner).unwrap();
     let join = Join {
         left: Arc::new(left_plan.to_owned()),
         right: Arc::new(right_plan.to_owned()),
@@ -58,17 +66,26 @@ fn create_df_plan(join_tree: JoinTree, df_plan: &LogicalPlan) -> LogicalPlan {
         filter: None,
         join_type: Inner,
         join_constraint: JoinConstraint::On,
-        schema: Arc::new(
-            left_plan
-                .schema()
-                .clone()
-                .join(right_plan.schema())
-                .expect("error in joining schemas"),
-        ),
+        schema: Arc::new(schema),
         null_equals_null: false,
     };
 
     LogicalPlan::Join(join)
+}
+
+fn reorder_expr_tuple(exprs: (Expr, Expr), left_tree: &JoinTree, right_tree: &JoinTree) -> (Expr, Expr) {
+    let copy = exprs.clone();
+    let left_set = left_tree.to_set();
+    let right_set = right_tree.to_set();
+    
+    let left_table = if let Expr::Column(c) = exprs.0 { c.relation.unwrap() } else { panic!("not column") };
+    let right_table = if let Expr::Column(c) = exprs.1 { c.relation.unwrap() } else { panic!("not column") };
+    
+    if left_set.contains(left_table.table()) && right_set.contains(right_table.table()) {
+        return copy;
+    }
+    
+    (copy.clone().1, copy.0)
 }
 
 fn edge_to_expr(edge: &Edge) -> (Expr, Expr) {
@@ -95,24 +112,17 @@ fn get_join_predicates(plan: &LogicalPlan) -> Vec<&BinaryExpr> {
 fn get_logical_scan_node<'a>(
     df_plan: &'a LogicalPlan,
     table_name: &str,
-) -> Option<&'a LogicalPlan> {
+) -> Option<&'a TableScan> {
     match df_plan {
         LogicalPlan::TableScan(table) => {
             if table.table_name.table() == table_name {
-                Some(df_plan)
-            } else {
-                None
-            }
-        }
-        LogicalPlan::SubqueryAlias(table) => {
-            if table.alias.table() == table_name {
-                Some(df_plan)
+                Some(table)
             } else {
                 None
             }
         }
         _ => {
-            let plans: Vec<&LogicalPlan> = df_plan
+            let plans: Vec<&TableScan> = df_plan
                 .inputs()
                 .iter()
                 .filter_map(|plan| get_logical_scan_node(plan, table_name))
@@ -218,6 +228,14 @@ fn verify_plan(plan: &LogicalPlan) -> bool {
     };
 
     plan.inputs().iter().all(|p| verify_plan(p))
+}
+
+fn table_name(table_names: &HashMap<String, String>, name: &str) -> String {
+    if table_names.contains_key(name) {
+        return table_names.get(name).unwrap().to_string();
+    }
+
+    name.to_string()
 }
 
 #[cfg(test)]
