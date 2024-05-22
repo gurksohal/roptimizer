@@ -24,10 +24,13 @@ impl Catalog {
     }
 
     pub fn get_rows(&self, table: &str) -> u64 {
+        assert!(self.stats.contains_key(table));
         self.stats.get(table).unwrap().rows
     }
 
     pub fn get_col_stats(&self, table: &str, col: &str) -> u64 {
+        assert!(self.stats.contains_key(table));
+        assert!(self.stats.get(table).unwrap().cols.contains_key(col));
         self.stats
             .get(table)
             .unwrap()

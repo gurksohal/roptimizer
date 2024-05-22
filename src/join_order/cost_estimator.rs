@@ -17,16 +17,16 @@ impl CostEstimator {
         let left_tree = JoinTree::from_join_node(tree.left.as_ref().unwrap());
         let right_tree = JoinTree::from_join_node(tree.right.as_ref().unwrap());
 
-        let left_cost = self.est_cost(&left_tree, table_names);
+        let mut left_cost = self.est_cost(&left_tree, table_names);
         let right_cost = self.est_cost(&right_tree, table_names);
         let curr_card = self.get_card(tree, table_names);
 
-        // let left_card = self.get_card(&left_tree, table_names);
-        // let right_card = self.get_card(&right_tree, table_names);
+        let left_card = self.get_card(&left_tree, table_names);
+        let right_card = self.get_card(&right_tree, table_names);
         // assume hash join, prefer plans with a smaller left side
-        // if left_card > right_card {
-        //     left_cost += left_card - right_card;
-        // }
+        if left_card > right_card {
+            left_cost += left_card - right_card;
+        }
         left_cost + right_cost + curr_card
     }
 
@@ -152,7 +152,7 @@ mod test {
             col1: "A".to_string(),
             col2: "A".to_string(),
         };
-        let expected_ans = (((1000 * 500) as f64) * (1.0 / 200.0)) as u64 + 1000 + 500;
+        let expected_ans = (((1000 * 500) as f64) * (1.0 / 200.0)) as u64 + 1000 + 500 + 500;
         let join_tree = a_join_tree.join(&b_join_tree, vec![edge]);
         assert_eq!(cost_estimator.est_cost(&join_tree, &table), expected_ans);
     }
@@ -189,7 +189,7 @@ mod test {
             .join(&b_join_tree, vec![edge_left])
             .join(&c_join_tree, vec![edge_right]);
 
-        let expected_ans = 25000 + 4000 + 2000;
+        let expected_ans = 25000 + 4000 + 2000 + 1000;
         assert_eq!(cost_estimator.est_cost(&tree, &table), expected_ans);
     }
 
@@ -234,7 +234,7 @@ mod test {
         let right_tree = c_join_tree.join(&d_join_tree, vec![cd_edge]);
         let final_tree = left_tree.join(&right_tree, vec![ac_edge]);
 
-        let expected_res = 25000 + 4000 + 4004;
+        let expected_res = 25000 + 4000 + 4004 + 2996;
         assert_eq!(cost_estimator.est_cost(&final_tree, &table), expected_res);
     }
 }
