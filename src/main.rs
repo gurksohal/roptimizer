@@ -4,7 +4,7 @@ use std::path::Path;
 use datafusion::logical_expr::LogicalPlan;
 use datafusion::prelude::{DataFrame, ParquetReadOptions, SessionConfig, SessionContext};
 
-use roptimizer::optimize;
+use crate::join_order::optimizer::{optimize_df};
 
 mod join_order;
 #[tokio::main]
@@ -15,7 +15,7 @@ async fn main() {
     let ctx = SessionContext::new_with_config(config);
     load_job_data(&ctx).await;
     let plan = get_df_plan(&ctx, "1a").await;
-    let plan = optimize(&plan);
+    let plan = optimize_df(&plan);
     let df = DataFrame::new(ctx.state(), plan);
     //df.collect().await.expect("TODO: panic message");
     println!("{}", df.into_unoptimized_plan().display_graphviz());

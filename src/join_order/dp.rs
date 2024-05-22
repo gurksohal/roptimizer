@@ -27,6 +27,13 @@ impl JoinNode {
             JoinNode::Single(s) => BTreeSet::from([s.to_owned()]),
         }
     }
+    
+    fn contains(&self, table: &str) -> bool {
+        match self {
+            JoinNode::Tree(t) => { t.contains(table) }
+            JoinNode::Single(s) => { s == table }
+        }
+    } 
 }
 impl JoinTree {
     fn create_single_node(node: String) -> JoinTree {
@@ -79,6 +86,14 @@ impl JoinTree {
             edges,
         }
     }
+    
+    pub fn contains(&self, table: &str) -> bool {
+        if self.size == 1 {
+            return self.left.as_ref().unwrap().contains(table);
+        }
+        
+        self.left.as_ref().unwrap().contains(table) || self.right.as_ref().unwrap().contains(table)
+    } 
 }
 
 impl Display for JoinNode {
@@ -117,7 +132,7 @@ impl Display for JoinTree {
         });
         write!(
             f,
-            "({} ⋈ {} ({}))",
+            "({} ⋈ {} [{}])",
             self.left.as_ref().unwrap(),
             self.right.as_ref().unwrap(),
             s
@@ -128,17 +143,15 @@ impl Display for JoinTree {
 pub struct JoinOrderOpt<'a> {
     graph: &'a QueryGraph,
     cost_estimator: CostEstimator,
-    costs: HashMap<JoinTree, u64>,
 }
 
 impl<'a> JoinOrderOpt<'a> {
-    pub fn build(graph: &QueryGraph) -> JoinOrderOpt {
+    pub fn build(graph: &QueryGraph, catalog: Catalog) -> JoinOrderOpt {
         let est = CostEstimator {
-            catalog: Catalog::build().unwrap(),
+            catalog
         };
         JoinOrderOpt {
             graph,
-            costs: HashMap::new(),
             cost_estimator: est,
         }
     }

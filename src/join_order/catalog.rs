@@ -24,7 +24,7 @@ impl Catalog {
     }
 
     pub fn get_rows(&self, table: &str) -> u64 {
-        assert!(self.stats.contains_key(table));
+        assert!(self.stats.contains_key(table), "can't find: {table} table");
         self.stats.get(table).unwrap().rows
     }
 

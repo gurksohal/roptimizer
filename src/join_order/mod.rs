@@ -1,4 +1,5 @@
-pub mod catalog;
-pub mod cost_estimator;
-pub mod dp;
-pub mod query_graph;
+mod catalog;
+mod cost_estimator;
+mod dp;
+mod query_graph;
+pub mod optimizer;

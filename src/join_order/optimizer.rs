@@ -8,21 +8,26 @@ use datafusion::logical_expr::{
 };
 use datafusion::prelude::Column;
 
+use crate::join_order::catalog::Catalog;
 use crate::join_order::dp::{JoinNode, JoinOrderOpt, JoinTree};
 use crate::join_order::query_graph::{Edge, leaf_binary_expr, QueryGraph};
 
-mod join_order;
-pub fn optimize(plan: &LogicalPlan) -> LogicalPlan {
+pub fn optimize_df(plan: &LogicalPlan) -> LogicalPlan {
     if !verify_plan(plan) {
         panic!("Unexpected plan")
     };
-
+    
+    let catalog = Catalog::build().unwrap();
     let graph = QueryGraph::build_query_graph(plan);
-    let mut opt = JoinOrderOpt::build(&graph);
-    let optimized_join_tree = opt.join_order();
+    let optimized_join_tree = optimize(graph, catalog);
     println!("{}", optimized_join_tree);
     let new_df_plan = create_df_plan(optimized_join_tree, plan);
     copy_and_merge_plan(plan, &new_df_plan).unwrap()
+}
+
+fn optimize(query_graph: QueryGraph, catalog: Catalog) -> JoinTree {
+    let mut opt = JoinOrderOpt::build(&query_graph, catalog);
+    opt.join_order()
 }
 
 fn create_df_plan(join_tree: JoinTree, df_plan: &LogicalPlan) -> LogicalPlan {
@@ -213,4 +218,67 @@ fn verify_plan(plan: &LogicalPlan) -> bool {
     };
 
     plan.inputs().iter().all(|p| verify_plan(p))
+}
+
+#[cfg(test)]
+mod test {
+    use std::collections::{BTreeSet, HashMap, HashSet};
+    use std::ops::Deref;
+
+    use crate::join_order::catalog::{Catalog, TableStats};
+    use crate::join_order::optimizer::optimize;
+    use crate::join_order::query_graph::{Edge, QueryGraph, Relation};
+
+    fn create_catalog() -> Catalog {
+        let a = TableStats {
+            rows: 100_000,
+            cols: HashMap::from([("A".to_string(), 200)])
+        };
+        
+        let b = TableStats {
+            rows: 1_000_000,
+            cols: HashMap::from([("A".to_string(), 1_000)])
+        };
+        
+        let c = TableStats {
+            rows: 1_000_000,
+            cols: HashMap::from([("A".to_string(), 1_000_000)])
+        };
+
+        let stats = HashMap::from([
+            ("A".to_string(), a),
+            ("B".to_string(), b),
+            ("C".to_string(), c),
+        ]);
+        Catalog { stats }
+    }
+    
+    #[test]
+    fn test_3_join() {
+        let catalog = create_catalog();
+        let edges = HashSet::from([
+            Edge {
+                node1: "A".to_string(),
+                node2: "B".to_string(),
+                col1: "A".to_string(),
+                col2: "A".to_string()
+            },
+            Edge {
+                node1: "B".to_string(),
+                node2: "C".to_string(),
+                col1: "A".to_string(),
+                col2: "A".to_string()
+            },
+        ]);
+        
+        let graph = QueryGraph {
+            edges,
+            table_names: HashMap::new(),
+            nodes: vec![Relation{name: "A".to_string(), id: 0}, Relation{name: "B".to_string(), id: 1}, Relation{name: "C".to_string(), id: 3}]
+        };
+        
+        let join_tree = optimize(graph, catalog);
+        let right_set = join_tree.right.as_ref().unwrap().deref();
+        assert_eq!(right_set.to_set(), BTreeSet::from(["B".to_string(), "C".to_string()]));
+    }
 }

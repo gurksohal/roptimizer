@@ -17,16 +17,10 @@ impl CostEstimator {
         let left_tree = JoinTree::from_join_node(tree.left.as_ref().unwrap());
         let right_tree = JoinTree::from_join_node(tree.right.as_ref().unwrap());
 
-        let mut left_cost = self.est_cost(&left_tree, table_names);
+        let left_cost = self.est_cost(&left_tree, table_names);
         let right_cost = self.est_cost(&right_tree, table_names);
         let curr_card = self.get_card(tree, table_names);
 
-        let left_card = self.get_card(&left_tree, table_names);
-        let right_card = self.get_card(&right_tree, table_names);
-        // assume hash join, prefer plans with a smaller left side
-        if left_card > right_card {
-            left_cost += left_card - right_card;
-        }
         left_cost + right_cost + curr_card
     }
 
@@ -56,9 +50,11 @@ impl CostEstimator {
 
         let mut sel: f64 = 1.0;
         for edge in edges {
+            assert!(tree.contains(&edge.node1));
+            assert!(tree.contains(&edge.node2));
             let table1 = self.table_name(table_names, &edge.node1);
             let table2 = self.table_name(table_names, &edge.node2);
-
+            
             let c1 = self.catalog.get_col_stats(table1.as_str(), &edge.col1) as f64;
             let c2 = self.catalog.get_col_stats(table2.as_str(), &edge.col2) as f64;
 

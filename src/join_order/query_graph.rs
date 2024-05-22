@@ -68,15 +68,7 @@ impl QueryGraph {
             table_names: graph.table_names.clone(),
         }
     }
-
-    pub fn table_name(&self, name: &str) -> String {
-        if self.table_names.contains_key(name) {
-            return self.table_names.get(name).unwrap().to_string();
-        }
-
-        name.to_string()
-    }
-
+    
     pub fn csg_cmp_pairs(&self) -> Vec<(BTreeSet<String>, BTreeSet<String>)> {
         let subsets: Vec<HashSet<&Relation>> = self.enumerate_csg();
         let mut res = vec![];
