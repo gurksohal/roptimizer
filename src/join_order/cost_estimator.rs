@@ -24,9 +24,9 @@ impl CostEstimator {
         let left_card = self.get_card(&left_tree, table_names);
         let right_card = self.get_card(&right_tree, table_names);
         // assume hash join, prefer plans with a smaller left side
-        if left_card > right_card {
-            left_cost += left_card - right_card;
-        }
+        // if left_card > right_card {
+        //     left_cost += left_card - right_card;
+        // }
         
         left_cost + right_cost + curr_card
     }

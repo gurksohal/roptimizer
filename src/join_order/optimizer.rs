@@ -4,7 +4,8 @@ use std::sync::Arc;
 
 use datafusion::common::JoinConstraint;
 use datafusion::common::JoinType::Inner;
-use datafusion::logical_expr::{Aggregate, BinaryExpr, build_join_schema, Expr, Filter, Join, Limit, LogicalPlan, Projection, SubqueryAlias, TableScan};
+use datafusion::common::tree_node::{Transformed, TreeNode, TreeNodeRecursion};
+use datafusion::logical_expr::{Aggregate, BinaryExpr, build_join_schema, Expr, Filter, Join, Limit, LogicalPlan, LogicalPlanBuilder, Projection, SubqueryAlias, TableScan};
 use datafusion::prelude::Column;
 
 use crate::join_order::catalog::Catalog;
@@ -19,8 +20,10 @@ pub fn optimize_df(plan: &LogicalPlan) -> LogicalPlan {
     let catalog = Catalog::build().unwrap();
     let graph = QueryGraph::build_query_graph(plan);
     let optimized_join_tree = optimize(graph.clone(), catalog);
-    let new_df_plan = join_tree_to_df(optimized_join_tree, plan, &graph);
-    copy_and_merge_plan(plan, &new_df_plan).unwrap()
+    let filter_preds = get_remaining_filters(plan);
+    let mut new_df_plan = join_tree_to_df(optimized_join_tree, plan, &graph, &filter_preds);
+    new_df_plan = copy_and_merge_plan(plan, &new_df_plan).unwrap();
+    remove_filter_node(&new_df_plan)
 }
 
 fn optimize(query_graph: QueryGraph, catalog: Catalog) -> JoinTree {
@@ -28,7 +31,7 @@ fn optimize(query_graph: QueryGraph, catalog: Catalog) -> JoinTree {
     opt.join_order()
 }
 
-fn join_tree_to_df(join_tree: JoinTree, df_plan: &LogicalPlan, graph: &QueryGraph) -> LogicalPlan {
+fn join_tree_to_df(join_tree: JoinTree, df_plan: &LogicalPlan, graph: &QueryGraph, filter_preds: &Vec<Expr>) -> LogicalPlan {
     if join_tree.size == 1 {
         assert!(join_tree.right.is_none(), "tree size is 1, and right is none");
         let join_node = join_tree.left.unwrap();
@@ -37,26 +40,66 @@ fn join_tree_to_df(join_tree: JoinTree, df_plan: &LogicalPlan, graph: &QueryGrap
         } else {
             panic!("left should be of single join node type");
         };
-        
+
         let full_name = table_name(&graph.table_names, t_name);
+        let to_apply: Vec<Expr> = filter_preds.iter().filter_map(|f| {
+            let mut name = get_table_from_expr(f).unwrap();
+
+            if &name == t_name || name == full_name {
+                name = table_name(&graph.table_names, &name);
+                let t = f.to_owned().transform_down(|e| {
+                    match e {
+                        Expr::Column(c) => {
+                            let new_c = Column::new(Some(name.to_string()), c.name.to_string());
+                            Ok(Transformed {
+                                data: Expr::Column(new_c),
+                                tnr: TreeNodeRecursion::Continue,
+                                transformed: false
+                            })
+                        }
+                        _ => {
+                            Ok(Transformed {
+                                data: e,
+                                tnr: TreeNodeRecursion::Continue,
+                                transformed: false
+                            })
+                        }
+                    }
+                }).unwrap();
+                
+                return Some(t.data);
+            }
+            
+            None
+        }).collect();
+        assert!(to_apply.len() <= 1);
+        
         let scan_node = get_logical_scan_node(df_plan, &full_name)
             .unwrap();
         
-        let scan_node = LogicalPlan::TableScan(TableScan::try_new(scan_node.table_name.clone(), scan_node.source.clone(), scan_node.projection.clone(), scan_node.filters.clone(), scan_node.fetch.clone()).unwrap());
+        let scan_node = LogicalPlan::TableScan(TableScan::try_new(scan_node.table_name.clone(), scan_node.source.clone(), scan_node.projection.clone(), scan_node.filters.clone(), scan_node.fetch).unwrap());
         
         if &full_name == t_name {
+            if !to_apply.is_empty() {
+                return LogicalPlan::Filter(Filter::try_new(to_apply.first().unwrap().clone(), Arc::from(scan_node)).unwrap());
+            }
             return scan_node;
         }
         
-       return LogicalPlan::SubqueryAlias(SubqueryAlias::try_new(Arc::from(scan_node), t_name).unwrap());
+        if !to_apply.is_empty() {
+            let f = LogicalPlan::Filter(Filter::try_new(to_apply.first().unwrap().clone(), Arc::from(scan_node)).unwrap());
+            return LogicalPlan::SubqueryAlias(SubqueryAlias::try_new(Arc::from(f), t_name).unwrap());
+        }
+        
+        return LogicalPlan::SubqueryAlias(SubqueryAlias::try_new(Arc::from(scan_node), t_name).unwrap());
     }
 
     let left_tree = JoinTree::from_join_node(&join_tree.left.expect("left was empty"));
     let right_tree = JoinTree::from_join_node(&join_tree.right.expect("right was empty"));
     let exprs: Vec<(Expr, Expr)> = join_tree.edges.iter().map(edge_to_expr).map(|e| reorder_expr_tuple(e, &left_tree, &right_tree)).collect();
 
-    let left_plan = join_tree_to_df(left_tree.to_owned(), df_plan, graph);
-    let right_plan = join_tree_to_df(right_tree.to_owned(), df_plan, graph);
+    let left_plan = join_tree_to_df(left_tree.to_owned(), df_plan, graph, filter_preds);
+    let right_plan = join_tree_to_df(right_tree.to_owned(), df_plan, graph, filter_preds);
     
     let schema = build_join_schema(left_plan.schema(), right_plan.schema(), &Inner).unwrap();
     let join = Join {
@@ -73,18 +116,44 @@ fn join_tree_to_df(join_tree: JoinTree, df_plan: &LogicalPlan, graph: &QueryGrap
     LogicalPlan::Join(join)
 }
 
+fn get_table_from_expr(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::Column(c) => {
+            Some(c.to_owned().relation.unwrap().to_string())
+        }
+        Expr::BinaryExpr(be) => {
+            let left = &be.left;
+            let right = &be.right;
+
+            let left_ans = get_table_from_expr(left);
+            if let Some(v) = left_ans {
+                return Some(v)
+            }
+            let right_ans = get_table_from_expr(right);
+            if let Some(v) = right_ans {
+                return Some(v)
+            }
+            None
+        }
+        Expr::Like(like) => {
+            get_table_from_expr(&like.expr)
+        }
+        node => panic!("unexpected: {node:#?}")
+    }
+}
+
 fn reorder_expr_tuple(exprs: (Expr, Expr), left_tree: &JoinTree, right_tree: &JoinTree) -> (Expr, Expr) {
     let copy = exprs.clone();
     let left_set = left_tree.to_set();
     let right_set = right_tree.to_set();
-    
+
     let left_table = if let Expr::Column(c) = exprs.0 { c.relation.unwrap() } else { panic!("not column") };
     let right_table = if let Expr::Column(c) = exprs.1 { c.relation.unwrap() } else { panic!("not column") };
-    
+
     if left_set.contains(left_table.table()) && right_set.contains(right_table.table()) {
         return copy;
     }
-    
+
     (copy.clone().1, copy.0)
 }
 
@@ -136,6 +205,38 @@ fn get_logical_scan_node<'a>(
     }
 }
 
+fn remove_filter_node(plan: &LogicalPlan) -> LogicalPlan {
+    let new_plan = plan.clone().transform_down(|node| {
+        let inputs = node.inputs();
+        let is_child_filter = inputs.iter().any(|child| matches!(child, LogicalPlan::Filter(_)));
+        if is_child_filter {
+            assert_eq!(inputs.len(), 1);
+            if let LogicalPlan::Filter(f) = inputs.first().unwrap() {
+                let filter_child = f.input.to_owned();
+                match node {
+                    LogicalPlan::Aggregate(a) => {
+                        let new_aggr = Aggregate::try_new(filter_child, a.group_expr, a.aggr_expr);
+                        return Ok(Transformed {
+                            data: LogicalPlan::Aggregate(new_aggr.unwrap()),
+                            transformed: true,
+                            tnr: TreeNodeRecursion::Stop
+                        });
+                    }
+                    f => { panic!("got: {f:#?}") }
+                }
+            } else { unreachable!(); };
+        }
+        
+        Ok(Transformed {
+            data: node,
+            tnr: TreeNodeRecursion::Continue,
+            transformed: false
+        })
+    }).expect("TODO: panic message");
+    
+    new_plan.data   
+}
+
 fn copy_and_merge_plan(plan: &LogicalPlan, new_plan: &LogicalPlan) -> Option<LogicalPlan> {
     match plan {
         LogicalPlan::Projection(p) => {
@@ -179,6 +280,23 @@ fn copy_and_merge_plan(plan: &LogicalPlan, new_plan: &LogicalPlan) -> Option<Log
         }
         _ => None,
     }
+}
+
+fn get_remaining_filters(plan: &LogicalPlan) -> Vec<Expr> {
+    let exprs = leaf_binary_expr(plan);
+    let join_pred = get_join_predicates(plan);
+    let mut v = vec![];
+    for e in exprs {
+        if join_pred.contains(&e) {
+            continue;
+        }
+
+        v.push(e);
+    }
+
+    v.iter()
+        .map(|e| Expr::BinaryExpr(e.to_owned().to_owned()))
+        .collect()
 }
 
 fn remove_join_predicates(plan: &LogicalPlan) -> Expr {

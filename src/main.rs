@@ -14,19 +14,19 @@ use crate::join_order::optimizer::optimize_df;
 mod join_order;
 #[tokio::main]
 async fn main() {
-    //let mut config = SessionConfig::default();
-    //config.options_mut().optimizer.max_passes = 3;
+    let mut config = SessionConfig::default();
+    config.options_mut().optimizer.max_passes = 3;
     
-    //let ctx = SessionContext::new_with_config(config);
-    //load_job_data(&ctx).await;
-    //let plan = get_df_plan(&ctx, "1a").await;
-    //let plan = optimize_df(&plan);
-    //print_join_schema(&plan);
-    //let df = DataFrame::new(ctx.state(), plan);
+    let ctx = SessionContext::new_with_config(config);
+    load_job_data(&ctx).await;
+    let plan = get_df_plan(&ctx, "10b").await;
+    let plan = optimize_df(&plan);
+    // print_join_schema(&plan);
+    let df = DataFrame::new(ctx.state(), plan);
     //df.collect().await.expect("TODO: panic message");
     //println!("{}", df.into_unoptimized_plan().display_graphviz());
     //println!("{}", df.into_optimized_plan().unwrap().display_graphviz());
-    run_and_test_all().await;
+    //run_and_test_all().await;
 }
 
 async fn run_and_test_all() {
