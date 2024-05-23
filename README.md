@@ -12,8 +12,9 @@
 
 ## Benchmark
 - Running all 113 JOB queries (https://github.com/gregrahn/join-order-benchmark) on DataFusion with default configs takes around ~40 mins
-
+  - https://github.com/gurksohal/roptimizer/blob/main/data/df_exec_time.json
 
 - Running all 113 queries through this optimizer and then executing on Datafusion (With DF optimizer turned off) takes around ~6 mins
   - Total time (including execution and running the optimizer): ~10mins (75% faster)
+    - https://github.com/gurksohal/roptimizer/blob/main/data/df_opt_exec_time.json (execution_time, optimization_time)
     - sadly there are some queries where it takes longer to optimize them than the actual execution time :/
