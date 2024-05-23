@@ -144,7 +144,7 @@ impl QueryGraph {
         let min = set.iter().min_by_key(|r| r.id).expect("empty set");
         let exclude: HashSet<&Relation> = self
             .nodes_with_eq_smaller_id(min.id)
-            .union(&set)
+            .union(set)
             .copied()
             .collect();
         let n = self.neighbourhood(set.clone()).sub(&exclude);

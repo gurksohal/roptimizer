@@ -16,7 +16,14 @@ mod join_order;
 const JOB_DATA_PATH: &str = "C:/Users/G/Desktop/jobdata/";
 #[tokio::main]
 async fn main() {
-    run_and_test_all().await;
+    //run_and_test_all().await;
+    let mut config = SessionConfig::default();
+    config.options_mut().optimizer.max_passes = 0;
+    let ctx = SessionContext::new_with_config(config);
+    load_job_data(&ctx).await;
+    let plan = get_df_plan(&ctx, "16b").await;
+    let plan = optimize_df(&plan);
+    println!("{}", plan.display_graphviz());
 }
 
 async fn run_and_test_all() {
