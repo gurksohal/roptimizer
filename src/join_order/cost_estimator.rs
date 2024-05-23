@@ -22,14 +22,7 @@ impl CostEstimator {
 
         let left_cost = self.est_cost(&left_tree, table_names);
         let right_cost = self.est_cost(&right_tree, table_names);
-        let mut curr_card = self.get_card(tree, table_names);
-
-        let left_card = self.get_card(&left_tree, table_names);
-        let right_card = self.get_card(&right_tree, table_names);
-        // assume hash join, prefer plans with a smaller left side
-        // if left_card > right_card {
-        //     curr_card += left_card - right_card;
-        // }
+        let curr_card = self.get_card(tree, table_names);
         
         curr_card + left_cost + right_cost
     }
@@ -57,36 +50,18 @@ impl CostEstimator {
 
         let edges = &tree.edges;
         assert!(!edges.is_empty());
-
-        // let mut start_sel = 0.2;
-        // let mut sel = 0.2;
-        // for _ in 1..edges.len() {
-        //     start_sel -= 0.05;
-        //     if start_sel < 0.05 {
-        //         sel *= 0.05;
-        //     } else {
-        //         sel *= start_sel;
-        //     }
-        // }
-
+        
         let mut sel: f64 = 1.0;
         for edge in edges {
             assert!(tree.contains(&edge.node1));
             assert!(tree.contains(&edge.node2));
-            let table1 = self.table_name(table_names, &edge.node1);
-            let table2 = self.table_name(table_names, &edge.node2);
-        
-            let c1 = self.catalog.get_col_stats(table1.as_str(), &edge.col1) as f64;
-            let c2 = self.catalog.get_col_stats(table2.as_str(), &edge.col2) as f64;
-        
-            let max = c1.max(c2);
-            sel *= max;
+            sel *= 0.2;
         }
 
         let sel = BigRational::from_float(sel).unwrap();
-        let left = left_card * right_card;
-        let left = BigRational::from_integer(left.to_bigint().unwrap());
-        let ans = left.mul(sel);
+        let card = left_card * right_card;
+        let card = BigRational::from_integer(card.to_bigint().unwrap());
+        let ans = card.mul(sel);
         ans.to_integer().to_biguint().unwrap()
     }
 
@@ -175,7 +150,7 @@ mod test {
             col1: "A".to_string(),
             col2: "A".to_string(),
         };
-        let expected_ans = BigUint::from(100001500_u64);
+        let expected_ans = BigUint::from(101500_u64);
         let join_tree = a_join_tree.join(&b_join_tree, vec![edge]);
         assert_eq!(cost_estimator.est_cost(&join_tree, &table), expected_ans);
     }
@@ -212,7 +187,7 @@ mod test {
             .join(&b_join_tree, vec![edge_left])
             .join(&c_join_tree, vec![edge_right]);
 
-        let expected_ans = BigUint::from(40000100003500_u64);
+        let expected_ans = BigUint::from(40103500_u64);
         assert_eq!(cost_estimator.est_cost(&tree, &table), expected_ans);
     }
 
@@ -257,7 +232,7 @@ mod test {
         let right_tree = c_join_tree.join(&d_join_tree, vec![cd_edge]);
         let final_tree = left_tree.join(&right_tree, vec![ac_edge]);
 
-        let expected_res = BigUint::from(640000100035504_u64);
+        let expected_res = BigUint::from(32105104_u64);
         assert_eq!(cost_estimator.est_cost(&final_tree, &table), expected_res);
     }
 }

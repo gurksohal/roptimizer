@@ -434,6 +434,6 @@ mod test {
         
         let join_tree = optimize(graph, catalog);
         let right_set = join_tree.right.as_ref().unwrap().deref();
-        assert_eq!(right_set.to_set(), BTreeSet::from(["A".to_string(), "B".to_string()]));
+        assert_eq!(right_set.to_set(), BTreeSet::from(["C".to_string()]));
     }
 }

@@ -14,7 +14,9 @@ use crate::join_order::optimizer::optimize_df;
 mod join_order;
 #[tokio::main]
 async fn main() {
+    let start = Instant::now();
     run_and_test_all().await;
+    println!("real total time: {}ms", (Instant::now() - start).as_millis())
 }
 
 async fn run_and_test_all() {

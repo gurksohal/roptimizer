@@ -28,15 +28,16 @@ impl Catalog {
         self.stats.get(table).unwrap().rows
     }
 
-    pub fn get_col_stats(&self, table: &str, col: &str) -> u64 {
-        assert!(self.stats.contains_key(table));
-        assert!(self.stats.get(table).unwrap().cols.contains_key(col));
-        self.stats
-            .get(table)
-            .unwrap()
-            .cols
-            .get(col)
-            .unwrap()
-            .to_owned()
+    fn get_col_stats(&self, table: &str, col: &str) -> u64 {
+        unreachable!();
+        // assert!(self.stats.contains_key(table));
+        // assert!(self.stats.get(table).unwrap().cols.contains_key(col));
+        // self.stats
+        //     .get(table)
+        //     .unwrap()
+        //     .cols
+        //     .get(col)
+        //     .unwrap()
+        //     .to_owned()
     }
 }
