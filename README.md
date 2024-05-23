@@ -3,6 +3,11 @@
 - Takes unoptimized datafusion logical plan (of a query from Join Order Benchmark) and outputs an optimized logical plan to be executed by datafusion.
   - uses DPCCP for join re-ordering (https://www.vldb.org/conf/2006/p930-moerkotte.pdf)
 
+## Run
+- [Download](https://github.com/gurksohal/roptimizer/releases/tag/1.0) and unzip JOB tables and queries.
+- Update path in [main.rs](https://github.com/gurksohal/roptimizer/blob/1.0/src/main.rs#L16)
+- `cargo run --bin roptimizer --release`
+
 ## Benchmark
 - Running all 113 JOB queries (https://github.com/gregrahn/join-order-benchmark) on [DataFusion](https://github.com/apache/datafusion) with default configs takes around ~40 mins
   - execution time in ms: https://github.com/gurksohal/roptimizer/blob/main/data/df_exec_time.json
