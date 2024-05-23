@@ -1,7 +1,7 @@
+use datafusion::common::tree_node::{TreeNode, TreeNodeRecursion};
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::fmt::{Display, Formatter};
 use std::ops::Sub;
-use datafusion::common::tree_node::{TreeNode, TreeNodeRecursion};
 
 use datafusion::logical_expr::{BinaryExpr, Expr, LogicalPlan, Operator};
 
@@ -54,11 +54,9 @@ impl QueryGraph {
         // all binary expressions, which have a relation on left and right
         let join_predicates: Vec<&BinaryExpr> = leaf_expr
             .iter()
-            .filter_map(|e| {
-                match e {
-                    Expr::BinaryExpr(f) => Some(f),
-                    _ => None
-                }
+            .filter_map(|e| match e {
+                Expr::BinaryExpr(f) => Some(f),
+                _ => None,
             })
             .filter(|e| matches!(*e.left, Expr::Column(_)) && matches!(*e.right, Expr::Column(_)))
             .collect();
@@ -74,7 +72,7 @@ impl QueryGraph {
             table_names: graph.table_names.clone(),
         }
     }
-    
+
     pub fn csg_cmp_pairs(&self) -> Vec<(BTreeSet<String>, BTreeSet<String>)> {
         let subsets: Vec<HashSet<&Relation>> = self.enumerate_csg();
         let mut res = vec![];
@@ -245,38 +243,43 @@ pub fn leaf_expr(plan: &LogicalPlan) -> Vec<Expr> {
         _ => panic!("No filter node found"),
     };
 
-    node.predicate.to_owned().apply(|expr| {
-        let binary_expr = if let Expr::BinaryExpr(e) = expr { e } else {
-            res.insert(expr.to_owned());
-            return Ok(TreeNodeRecursion::Jump);
-        };
+    node.predicate
+        .to_owned()
+        .apply(|expr| {
+            let binary_expr = if let Expr::BinaryExpr(e) = expr {
+                e
+            } else {
+                res.insert(expr.to_owned());
+                return Ok(TreeNodeRecursion::Jump);
+            };
 
-        let left = &*binary_expr.left;
-        let right = &*binary_expr.right;
+            let left = &*binary_expr.left;
+            let right = &*binary_expr.right;
 
-        if binary_expr.op != Operator::And {
-            res.insert(expr.to_owned());
-            return Ok(TreeNodeRecursion::Jump);
-        }
+            if binary_expr.op != Operator::And {
+                res.insert(expr.to_owned());
+                return Ok(TreeNodeRecursion::Jump);
+            }
 
-        match (left, right) {
-            (Expr::BinaryExpr(_), Expr::BinaryExpr(_)) => { Ok(TreeNodeRecursion::Continue) }
-            (Expr::BinaryExpr(_), f) => {
-                res.insert(f.to_owned());
-                Ok(TreeNodeRecursion::Continue)
+            match (left, right) {
+                (Expr::BinaryExpr(_), Expr::BinaryExpr(_)) => Ok(TreeNodeRecursion::Continue),
+                (Expr::BinaryExpr(_), f) => {
+                    res.insert(f.to_owned());
+                    Ok(TreeNodeRecursion::Continue)
+                }
+                (f, Expr::BinaryExpr(_)) => {
+                    res.insert(f.to_owned());
+                    Ok(TreeNodeRecursion::Continue)
+                }
+                (x, y) => {
+                    res.insert(x.to_owned());
+                    res.insert(y.to_owned());
+                    Ok(TreeNodeRecursion::Jump)
+                }
             }
-            (f, Expr::BinaryExpr(_)) => {
-                res.insert(f.to_owned());
-                Ok(TreeNodeRecursion::Continue)
-            }
-            (x, y) => {
-                res.insert(x.to_owned());
-                res.insert(y.to_owned());
-                Ok(TreeNodeRecursion::Jump)
-            }
-        }
-    }).expect("shouldn't fail");
-    
+        })
+        .expect("shouldn't fail");
+
     Vec::from_iter(res)
 }
 

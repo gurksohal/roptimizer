@@ -12,39 +12,39 @@ use datafusion::prelude::{DataFrame, ParquetReadOptions, SessionConfig, SessionC
 use crate::join_order::optimizer::optimize_df;
 
 mod join_order;
+
+const JOB_DATA_PATH: &str = "C:/Users/G/Desktop/jobdata/";
 #[tokio::main]
 async fn main() {
-    let start = Instant::now();
     run_and_test_all().await;
-    println!("real total time: {}ms", (Instant::now() - start).as_millis())
 }
 
 async fn run_and_test_all() {
     let mut exec_time = BTreeMap::new();
     let mut config = SessionConfig::default();
     config.options_mut().optimizer.max_passes = 0;
-    
+
     let ctx = SessionContext::new_with_config(config);
     load_job_data(&ctx).await;
 
-    let queries_path = "C:/Users/G/Desktop/jobdata/query";
+    let queries_path = format!("{JOB_DATA_PATH}query");
     let mut files = fs::read_dir(queries_path).unwrap();
     let mut total_time = 0;
     let mut total_join_order_time = 0;
-    
+
     let json = fs::read_to_string("./data/df_res.json").unwrap();
     let old_res: BTreeMap<String, Vec<String>> = serde_json::from_str(&json).unwrap();
-    
+
     while let Some(Ok(entry)) = files.next() {
         let filename = entry.file_name();
         let filename = filename.to_str().unwrap().strip_suffix(".sql").unwrap();
-        
+
         let plan = get_df_plan(&ctx, filename).await;
         let plan_start = Instant::now();
         let plan = optimize_df(&plan);
         let join_order_time = (Instant::now() - plan_start).as_millis();
         total_join_order_time += join_order_time;
-        
+
         let df = DataFrame::new(ctx.state(), plan);
         let local_start = Instant::now();
         let records = df.collect().await.unwrap();
@@ -69,18 +69,26 @@ async fn run_and_test_all() {
         }
 
         let key = format!("{filename}.sql");
-        assert_eq!(old_res.get(&key).unwrap().to_owned(), r, "diff result for {key}");
+        assert_eq!(
+            old_res.get(&key).unwrap().to_owned(),
+            r,
+            "diff result for {key}"
+        );
     }
 
-    exec_time.insert(String::from("total_time"), (total_time, total_join_order_time));
+    exec_time.insert(
+        String::from("total_time"),
+        (total_time, total_join_order_time),
+    );
     println!("total time = {total_time}");
     println!("total join order time = {total_join_order_time}");
     let exec_time_json = serde_json::to_string(&exec_time).unwrap();
-    fs::write(Path::new("./data/df_opt_exec_time.json"), exec_time_json).expect("unable to write json");
+    fs::write(Path::new("./data/df_opt_exec_time.json"), exec_time_json)
+        .expect("unable to write json");
 }
 
 async fn load_job_data(ctx: &SessionContext) {
-    let table_dir = "C:\\Users\\G\\Desktop\\jobdata\\imdb";
+    let table_dir = format!("{JOB_DATA_PATH}imdb");
     let mut tables = fs::read_dir(table_dir).unwrap();
     while let Some(Ok(entry)) = tables.next() {
         let path = entry.path();
@@ -99,7 +107,7 @@ async fn load_job_data(ctx: &SessionContext) {
 
 // Get plan for a given JOB query
 async fn get_df_plan(ctx: &SessionContext, query: &str) -> LogicalPlan {
-    let queries_path = format!("C:/Users/G/Desktop/jobdata/query/{}.sql", query);
+    let queries_path = format!("{JOB_DATA_PATH}query/{}.sql", query);
     let query_str = fs::read_to_string(queries_path).unwrap();
     let df = ctx.sql(query_str.as_str()).await.unwrap();
     df.logical_plan().to_owned()

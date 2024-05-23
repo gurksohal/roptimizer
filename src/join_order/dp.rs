@@ -1,6 +1,6 @@
+use num::BigUint;
 use std::collections::{BTreeSet, HashMap};
 use std::fmt::{Display, Formatter};
-use num::BigUint;
 
 use crate::join_order::catalog::Catalog;
 use crate::join_order::cost_estimator::CostEstimator;
@@ -28,13 +28,13 @@ impl JoinNode {
             JoinNode::Single(s) => BTreeSet::from([s.to_owned()]),
         }
     }
-    
+
     fn contains(&self, table: &str) -> bool {
         match self {
-            JoinNode::Tree(t) => { t.contains(table) }
-            JoinNode::Single(s) => { s == table }
+            JoinNode::Tree(t) => t.contains(table),
+            JoinNode::Single(s) => s == table,
         }
-    } 
+    }
 }
 impl JoinTree {
     fn create_single_node(node: String) -> JoinTree {
@@ -87,14 +87,14 @@ impl JoinTree {
             edges,
         }
     }
-    
+
     pub fn contains(&self, table: &str) -> bool {
         if self.size == 1 {
             return self.left.as_ref().unwrap().contains(table);
         }
-        
+
         self.left.as_ref().unwrap().contains(table) || self.right.as_ref().unwrap().contains(table)
-    } 
+    }
 }
 
 impl Display for JoinNode {
@@ -148,9 +148,7 @@ pub struct JoinOrderOpt<'a> {
 
 impl<'a> JoinOrderOpt<'a> {
     pub fn build(graph: &QueryGraph, catalog: Catalog) -> JoinOrderOpt {
-        let est = CostEstimator {
-            catalog
-        };
+        let est = CostEstimator { catalog };
         JoinOrderOpt {
             graph,
             cost_estimator: est,

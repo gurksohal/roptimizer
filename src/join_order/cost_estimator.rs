@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::ops::{Deref, Mul};
 
-use num::{BigRational, BigUint};
 use num::bigint::ToBigInt;
+use num::{BigRational, BigUint};
 
 use crate::join_order::catalog::Catalog;
 use crate::join_order::dp::{JoinNode, JoinTree};
@@ -23,7 +23,7 @@ impl CostEstimator {
         let left_cost = self.est_cost(&left_tree, table_names);
         let right_cost = self.est_cost(&right_tree, table_names);
         let curr_card = self.get_card(tree, table_names);
-        
+
         curr_card + left_cost + right_cost
     }
 
@@ -50,7 +50,7 @@ impl CostEstimator {
 
         let edges = &tree.edges;
         assert!(!edges.is_empty());
-        
+
         let mut sel: f64 = 1.0;
         for edge in edges {
             assert!(tree.contains(&edge.node1));
