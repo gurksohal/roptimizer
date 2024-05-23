@@ -20,7 +20,7 @@ async fn main() {
 async fn run_and_test_all() {
     let mut exec_time = BTreeMap::new();
     let mut config = SessionConfig::default();
-    //config.options_mut().optimizer.max_passes = 0;
+    config.options_mut().optimizer.max_passes = 0;
     
     let ctx = SessionContext::new_with_config(config);
     load_job_data(&ctx).await;
