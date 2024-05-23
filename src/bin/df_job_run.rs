@@ -7,17 +7,15 @@ use std::fs;
 use std::path::Path;
 use std::time::Instant;
 
-use datafusion::prelude::{ParquetReadOptions, SessionConfig, SessionContext};
+use datafusion::prelude::{ParquetReadOptions, SessionContext};
 
-// Takes ~14 mins
+// Takes ~40mins wih default settings
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let mut res = BTreeMap::new();
     let mut exec_time = BTreeMap::new();
-    let mut config = SessionConfig::default();
-    //config.options_mut().execution.collect_statistics = true;
 
-    let ctx = SessionContext::new_with_config(config);
+    let ctx = SessionContext::new();
     let table_dir = "C:\\Users\\G\\Desktop\\jobdata\\imdb";
     let mut tables = fs::read_dir(table_dir)?;
     let start = Instant::now();
@@ -68,7 +66,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 }
             }
         }
-
+        
         res.insert(filename.to_string(), r);
     }
 
