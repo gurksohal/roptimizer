@@ -1,5 +1,6 @@
 use std::collections::{BTreeSet, HashMap};
 use std::fmt::{Display, Formatter};
+use num::BigUint;
 
 use crate::join_order::catalog::Catalog;
 use crate::join_order::cost_estimator::CostEstimator;
@@ -229,7 +230,7 @@ impl<'a> JoinOrderOpt<'a> {
         edges
     }
 
-    fn cost(&self, join_tree: &JoinTree) -> u64 {
+    fn cost(&self, join_tree: &JoinTree) -> BigUint {
         self.cost_estimator
             .est_cost(join_tree, &self.graph.table_names)
     }

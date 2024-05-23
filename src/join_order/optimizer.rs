@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ops::Deref;
 use std::sync::Arc;
 
@@ -10,7 +10,7 @@ use datafusion::prelude::Column;
 
 use crate::join_order::catalog::Catalog;
 use crate::join_order::dp::{JoinNode, JoinOrderOpt, JoinTree};
-use crate::join_order::query_graph::{Edge, leaf_binary_expr, QueryGraph};
+use crate::join_order::query_graph::{Edge, leaf_expr, QueryGraph};
 
 pub fn optimize_df(plan: &LogicalPlan) -> LogicalPlan {
     if !verify_plan(plan) {
@@ -31,6 +31,7 @@ fn optimize(query_graph: QueryGraph, catalog: Catalog) -> JoinTree {
     opt.join_order()
 }
 
+// Create df plan from join tree and push non join predicate filters down
 fn join_tree_to_df(join_tree: JoinTree, df_plan: &LogicalPlan, graph: &QueryGraph, filter_preds: &Vec<Expr>) -> LogicalPlan {
     if join_tree.size == 1 {
         assert!(join_tree.right.is_none(), "tree size is 1, and right is none");
@@ -66,31 +67,31 @@ fn join_tree_to_df(join_tree: JoinTree, df_plan: &LogicalPlan, graph: &QueryGrap
                         }
                     }
                 }).unwrap();
-                
+
                 return Some(t.data);
             }
-            
+
             None
         }).collect();
-        assert!(to_apply.len() <= 1);
-        
+
+        let to_apply_expr = create_expr(to_apply.clone());
         let scan_node = get_logical_scan_node(df_plan, &full_name)
             .unwrap();
         
         let scan_node = LogicalPlan::TableScan(TableScan::try_new(scan_node.table_name.clone(), scan_node.source.clone(), scan_node.projection.clone(), scan_node.filters.clone(), scan_node.fetch).unwrap());
-        
+
         if &full_name == t_name {
             if !to_apply.is_empty() {
-                return LogicalPlan::Filter(Filter::try_new(to_apply.first().unwrap().clone(), Arc::from(scan_node)).unwrap());
+                return LogicalPlan::Filter(Filter::try_new(to_apply_expr.unwrap(), Arc::from(scan_node)).unwrap());
             }
             return scan_node;
         }
-        
+
         if !to_apply.is_empty() {
-            let f = LogicalPlan::Filter(Filter::try_new(to_apply.first().unwrap().clone(), Arc::from(scan_node)).unwrap());
+            let f = LogicalPlan::Filter(Filter::try_new(to_apply_expr.unwrap(), Arc::from(scan_node)).unwrap());
             return LogicalPlan::SubqueryAlias(SubqueryAlias::try_new(Arc::from(f), t_name).unwrap());
         }
-        
+
         return LogicalPlan::SubqueryAlias(SubqueryAlias::try_new(Arc::from(scan_node), t_name).unwrap());
     }
 
@@ -116,6 +117,29 @@ fn join_tree_to_df(join_tree: JoinTree, df_plan: &LogicalPlan, graph: &QueryGrap
     LogicalPlan::Join(join)
 }
 
+fn create_expr(to_apply: Vec<Expr>) -> Option<Expr> {
+    if to_apply.is_empty() {
+        return None
+    }
+    
+    let first = to_apply.first()?;
+    
+    let mut set: HashSet<Expr> = HashSet::new();
+    set.insert(first.to_owned());
+    let mut root = first.to_owned();
+
+    for i in 0..to_apply.len() {
+        let t = to_apply.get(i).unwrap().to_owned();
+        if set.contains(&t) {
+            continue;
+        }
+        set.insert(t.to_owned());
+        root = root.and(t);
+    }
+
+    Some(root)
+}
+
 fn get_table_from_expr(expr: &Expr) -> Option<String> {
     match expr {
         Expr::Column(c) => {
@@ -137,6 +161,18 @@ fn get_table_from_expr(expr: &Expr) -> Option<String> {
         }
         Expr::Like(like) => {
             get_table_from_expr(&like.expr)
+        }
+        Expr::IsNull(null) => {
+            get_table_from_expr(null)
+        }
+        Expr::Between(between) => {
+            get_table_from_expr(&between.expr)
+        }
+        Expr::IsNotNull(nn) => {
+            get_table_from_expr(nn)
+        }
+        Expr::InList(list) => {
+            get_table_from_expr(&list.expr)
         }
         node => panic!("unexpected: {node:#?}")
     }
@@ -170,11 +206,17 @@ fn edge_to_expr(edge: &Edge) -> (Expr, Expr) {
     (left_col, right_col)
 }
 
-fn get_join_predicates(plan: &LogicalPlan) -> Vec<&BinaryExpr> {
-    leaf_binary_expr(plan)
+fn get_join_predicates(plan: &LogicalPlan) -> Vec<BinaryExpr> {
+    leaf_expr(plan)
         .iter()
+        .filter_map(|e| {
+            match e {
+                Expr::BinaryExpr(f) => Some(f),
+                _ => None
+            }
+        })
         .filter(|e| matches!(*e.left, Expr::Column(_)) && matches!(*e.right, Expr::Column(_)))
-        .copied()
+        .cloned()
         .collect()
 }
 
@@ -199,8 +241,9 @@ fn get_logical_scan_node<'a>(
             if plans.is_empty() {
                 return None;
             }
-            assert_eq!(plans.len(), 1, "size of plans should be one");
-            return Some(plans.first().unwrap());
+            let set: HashSet<&TableScan> = HashSet::from_iter(plans);
+            assert_eq!(set.len(), 1, "{}", set.len());
+            return Some(set.iter().next().unwrap());
         }
     }
 }
@@ -226,15 +269,15 @@ fn remove_filter_node(plan: &LogicalPlan) -> LogicalPlan {
                 }
             } else { unreachable!(); };
         }
-        
+
         Ok(Transformed {
             data: node,
             tnr: TreeNodeRecursion::Continue,
             transformed: false
         })
-    }).expect("TODO: panic message");
-    
-    new_plan.data   
+    }).expect("");
+
+    new_plan.data
 }
 
 fn copy_and_merge_plan(plan: &LogicalPlan, new_plan: &LogicalPlan) -> Option<LogicalPlan> {
@@ -283,53 +326,29 @@ fn copy_and_merge_plan(plan: &LogicalPlan, new_plan: &LogicalPlan) -> Option<Log
 }
 
 fn get_remaining_filters(plan: &LogicalPlan) -> Vec<Expr> {
-    let exprs = leaf_binary_expr(plan);
+    let exprs = leaf_expr(plan);
     let join_pred = get_join_predicates(plan);
     let mut v = vec![];
     for e in exprs {
-        if join_pred.contains(&e) {
-            continue;
-        }
-
-        v.push(e);
+        if let Expr::BinaryExpr(eb) = &e {
+            if join_pred.contains(eb) {
+                continue;
+            } else {
+                v.push(e);
+            }
+        } else {
+            v.push(e);
+        };
     }
 
-    v.iter()
-        .map(|e| Expr::BinaryExpr(e.to_owned().to_owned()))
-        .collect()
+    v
 }
 
 fn remove_join_predicates(plan: &LogicalPlan) -> Expr {
-    let exprs = leaf_binary_expr(plan);
-    let join_pred = get_join_predicates(plan);
-    let mut v = vec![];
-    for e in exprs {
-        if join_pred.contains(&e) {
-            continue;
-        }
-
-        v.push(e);
-    }
-    let v: Vec<Expr> = v
-        .iter()
-        .map(|e| Expr::BinaryExpr(e.to_owned().to_owned()))
-        .collect();
+    let v: Vec<Expr> = get_remaining_filters(plan);
 
     assert!(!v.is_empty());
-    let first = v.first().unwrap().to_owned();
-    let first = if let Expr::BinaryExpr(e) = first {
-        e
-    } else {
-        panic!("not binary")
-    };
-    let mut root = Expr::BinaryExpr(first);
-
-    for i in 1..v.len() {
-        let t = v.get(i).unwrap().to_owned();
-        root = root.and(t);
-    }
-
-    root
+    create_expr(v).unwrap()
 }
 
 // Make sure plan only has expected/supported nodes
@@ -415,6 +434,6 @@ mod test {
         
         let join_tree = optimize(graph, catalog);
         let right_set = join_tree.right.as_ref().unwrap().deref();
-        assert_eq!(right_set.to_set(), BTreeSet::from(["B".to_string(), "C".to_string()]));
+        assert_eq!(right_set.to_set(), BTreeSet::from(["A".to_string(), "B".to_string()]));
     }
 }

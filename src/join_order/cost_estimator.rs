@@ -1,5 +1,6 @@
 use std::collections::HashMap;
-use std::ops::Deref;
+use std::ops::{Deref, Div, Mul};
+use num::BigUint;
 
 use crate::join_order::catalog::Catalog;
 use crate::join_order::dp::{JoinNode, JoinTree};
@@ -9,7 +10,7 @@ pub struct CostEstimator {
 }
 
 impl CostEstimator {
-    pub fn est_cost(&self, tree: &JoinTree, table_names: &HashMap<String, String>) -> u64 {
+    pub fn est_cost(&self, tree: &JoinTree, table_names: &HashMap<String, String>) -> BigUint {
         if tree.size == 1 {
             return self.get_card(tree, table_names);
         }
@@ -17,22 +18,22 @@ impl CostEstimator {
         let left_tree = JoinTree::from_join_node(tree.left.as_ref().unwrap());
         let right_tree = JoinTree::from_join_node(tree.right.as_ref().unwrap());
 
-        let mut left_cost = self.est_cost(&left_tree, table_names);
+        let left_cost = self.est_cost(&left_tree, table_names);
         let right_cost = self.est_cost(&right_tree, table_names);
-        let curr_card = self.get_card(tree, table_names);
+        let mut curr_card = self.get_card(tree, table_names);
 
         let left_card = self.get_card(&left_tree, table_names);
         let right_card = self.get_card(&right_tree, table_names);
         // assume hash join, prefer plans with a smaller left side
         // if left_card > right_card {
-        //     left_cost += left_card - right_card;
+        //     curr_card += left_card - right_card;
         // }
         
-        left_cost + right_cost + curr_card
+        curr_card + left_cost + right_cost
     }
 
     // num of output rows
-    fn get_card(&self, tree: &JoinTree, table_names: &HashMap<String, String>) -> u64 {
+    fn get_card(&self, tree: &JoinTree, table_names: &HashMap<String, String>) -> BigUint {
         if tree.size == 1 {
             let r = if let JoinNode::Single(s) = tree.left.as_ref().unwrap().deref() {
                 s
@@ -43,7 +44,7 @@ impl CostEstimator {
 
             let r = self.table_name(table_names, r);
             let cost = self.table_size(&r);
-            return cost;
+            return BigUint::from(cost);
         }
 
         let left_tree = JoinTree::from_join_node(tree.left.as_ref().unwrap());
@@ -55,6 +56,17 @@ impl CostEstimator {
         let edges = &tree.edges;
         assert!(!edges.is_empty());
 
+        // let mut start_sel = 0.2;
+        // let mut sel = 0.2;
+        // for _ in 1..edges.len() {
+        //     start_sel -= 0.05;
+        //     if start_sel < 0.05 {
+        //         sel *= 0.05;
+        //     } else {
+        //         sel *= start_sel;
+        //     }
+        // }
+        
         let mut sel: f64 = 1.0;
         for edge in edges {
             assert!(tree.contains(&edge.node1));
@@ -64,13 +76,16 @@ impl CostEstimator {
             
             let c1 = self.catalog.get_col_stats(table1.as_str(), &edge.col1) as f64;
             let c2 = self.catalog.get_col_stats(table2.as_str(), &edge.col2) as f64;
-
+        
             let max = c1.max(c2);
-            let local_sel = 1.0 / max;
-            sel *= local_sel;
+            //let local_sel = 0.2;
+            sel *= max;
         }
-
-        (((left_card * right_card) as f64) * sel) as u64
+        
+        let sel = BigUint::from((sel * 100.0) as u32);
+        let left = left_card * right_card;
+        let ans = left * sel;
+        ans.div(BigUint::from(100_u32))
     }
 
     pub fn table_size(&self, name: &str) -> u64 {
@@ -93,6 +108,7 @@ mod test {
     use crate::join_order::dp::{JoinNode, JoinTree};
     use crate::join_order::query_graph::Edge;
     use std::collections::HashMap;
+    use num::BigUint;
 
     fn create_catalog() -> Catalog {
         let a = TableStats {
@@ -136,7 +152,7 @@ mod test {
         let card = cost_estimator.get_card(&join_tree, &table);
         let cost = cost_estimator.est_cost(&join_tree, &table);
         assert_eq!(card, cost);
-        assert_eq!(card, 1000);
+        assert_eq!(card, BigUint::from(1000_u32));
     }
 
     #[test]
@@ -155,7 +171,7 @@ mod test {
             col1: "A".to_string(),
             col2: "A".to_string(),
         };
-        let expected_ans = (((1000 * 500) as f64) * (1.0 / 200.0)) as u64 + 1000 + 500 + 500;
+        let expected_ans = BigUint::from(102000_u64);
         let join_tree = a_join_tree.join(&b_join_tree, vec![edge]);
         assert_eq!(cost_estimator.est_cost(&join_tree, &table), expected_ans);
     }
@@ -192,7 +208,7 @@ mod test {
             .join(&b_join_tree, vec![edge_left])
             .join(&c_join_tree, vec![edge_right]);
 
-        let expected_ans = 25000 + 4000 + 2000 + 1000;
+        let expected_ans = BigUint::from(40202000_u32);
         assert_eq!(cost_estimator.est_cost(&tree, &table), expected_ans);
     }
 
@@ -237,7 +253,7 @@ mod test {
         let right_tree = c_join_tree.join(&d_join_tree, vec![cd_edge]);
         let final_tree = left_tree.join(&right_tree, vec![ac_edge]);
 
-        let expected_res = 25000 + 4000 + 4004 + 2996;
+        let expected_res = BigUint::from(32206000_u32);
         assert_eq!(cost_estimator.est_cost(&final_tree, &table), expected_res);
     }
 }

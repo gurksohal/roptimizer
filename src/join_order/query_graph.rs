@@ -1,6 +1,7 @@
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::fmt::{Display, Formatter};
 use std::ops::Sub;
+use datafusion::common::tree_node::{TreeNode, TreeNodeRecursion};
 
 use datafusion::logical_expr::{BinaryExpr, Expr, LogicalPlan, Operator};
 
@@ -48,13 +49,18 @@ impl QueryGraph {
         let table_names: HashMap<String, String> = get_table_names(plan);
 
         // expr
-        let leaf_expr = leaf_binary_expr(plan);
+        let leaf_expr = leaf_expr(plan);
 
         // all binary expressions, which have a relation on left and right
         let join_predicates: Vec<&BinaryExpr> = leaf_expr
             .iter()
+            .filter_map(|e| {
+                match e {
+                    Expr::BinaryExpr(f) => Some(f),
+                    _ => None
+                }
+            })
             .filter(|e| matches!(*e.left, Expr::Column(_)) && matches!(*e.right, Expr::Column(_)))
-            .copied()
             .collect();
 
         let g = build_graph(table_names, join_predicates);
@@ -231,45 +237,47 @@ fn build_graph(table_names: HashMap<String, String>, join_predicates: Vec<&Binar
     }
 }
 
-pub fn leaf_binary_expr(plan: &LogicalPlan) -> Vec<&BinaryExpr> {
+pub fn leaf_expr(plan: &LogicalPlan) -> Vec<Expr> {
+    let mut res = HashSet::new();
     let filter_node = find_filter_node(plan);
     let node = match filter_node {
         Some(LogicalPlan::Filter(filter)) => filter,
         _ => panic!("No filter node found"),
     };
-    let binary_expr = match &node.predicate {
-        Expr::BinaryExpr(e) => e,
-        _ => panic!("root expr is not binary"),
-    };
 
-    let mut vec = vec![];
-    walk_expr(binary_expr, &mut vec);
-    vec
-}
+    node.predicate.to_owned().apply(|expr| {
+        let binary_expr = if let Expr::BinaryExpr(e) = expr { e } else {
+            res.insert(expr.to_owned());
+            return Ok(TreeNodeRecursion::Jump);
+        };
 
-fn walk_expr<'a>(binary_expr: &'a BinaryExpr, vec: &mut Vec<&'a BinaryExpr>) {
-    let left = &*binary_expr.left;
-    let right = &*binary_expr.right;
+        let left = &*binary_expr.left;
+        let right = &*binary_expr.right;
 
-    if binary_expr.op != Operator::And {
-        vec.push(binary_expr);
-        return;
-    }
+        if binary_expr.op != Operator::And {
+            res.insert(expr.to_owned());
+            return Ok(TreeNodeRecursion::Jump);
+        }
 
-    let mut is_leaf = true;
-    if let Expr::BinaryExpr(e) = left {
-        walk_expr(e, vec);
-        is_leaf = false;
-    }
-
-    if let Expr::BinaryExpr(e) = right {
-        walk_expr(e, vec);
-        is_leaf = false;
-    }
-
-    if is_leaf {
-        vec.push(binary_expr);
-    }
+        match (left, right) {
+            (Expr::BinaryExpr(_), Expr::BinaryExpr(_)) => { Ok(TreeNodeRecursion::Continue) }
+            (Expr::BinaryExpr(_), f) => {
+                res.insert(f.to_owned());
+                Ok(TreeNodeRecursion::Continue)
+            }
+            (f, Expr::BinaryExpr(_)) => {
+                res.insert(f.to_owned());
+                Ok(TreeNodeRecursion::Continue)
+            }
+            (x, y) => {
+                res.insert(x.to_owned());
+                res.insert(y.to_owned());
+                Ok(TreeNodeRecursion::Jump)
+            }
+        }
+    }).expect("shouldn't fail");
+    
+    Vec::from_iter(res)
 }
 
 // DFS to find the first filter node

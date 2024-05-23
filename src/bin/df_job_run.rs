@@ -15,7 +15,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut res = BTreeMap::new();
     let mut exec_time = BTreeMap::new();
     let mut config = SessionConfig::default();
-    config.options_mut().execution.collect_statistics = true;
+    //config.options_mut().execution.collect_statistics = true;
 
     let ctx = SessionContext::new_with_config(config);
     let table_dir = "C:\\Users\\G\\Desktop\\jobdata\\imdb";
@@ -52,6 +52,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let time = (Instant::now() - local_start).as_millis();
 
         total_time += time;
+        println!("{filename}: took {time}ms");
         exec_time.insert(filename.to_string(), time);
 
         let mut r = vec![];

@@ -11,3 +11,4 @@ tokio = { version = "1.0.0", features = ["rt", "rt-multi-thread", "macros"] }
 serde_json = "1.0"
 serde = { version = "1.0.200", features = ["derive"] }
 duckdb = { version = "0.10.2", features = ["bundled"] }
+num = "0.4"
