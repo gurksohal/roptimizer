@@ -8,9 +8,11 @@
   - execution time in ms: https://github.com/gurksohal/roptimizer/blob/main/data/df_exec_time.json
 
 - Running all 113 queries through this optimizer and then executing on Datafusion (With DF optimizer turned off) takes around ~6 mins
-  - Total time (including execution and running the optimizer): ~10mins (75% faster)
+  - Total time (including execution and running the optimizer): ~10mins **(75% faster)**
     - (execution_time, optimization_time) in ms: https://github.com/gurksohal/roptimizer/blob/main/data/df_opt_exec_time.json 
     - sadly there are some queries where it takes longer to optimize them than the actual execution time :/
+
+![chard.svg](img/chart.svg)
    
 ## Input and Output plans (Query 16b from JOB)
 ### Input:
