@@ -4,7 +4,7 @@
   - uses DPCCP for join re-ordering (https://www.vldb.org/conf/2006/p930-moerkotte.pdf)
 
 ## Benchmark
-- Running all 113 JOB queries (https://github.com/gregrahn/join-order-benchmark) on DataFusion with default configs takes around ~40 mins
+- Running all 113 JOB queries (https://github.com/gregrahn/join-order-benchmark) on [DataFusion](https://github.com/apache/datafusion) with default configs takes around ~40 mins
   - execution time in ms: https://github.com/gurksohal/roptimizer/blob/main/data/df_exec_time.json
 
 - Running all 113 queries through this optimizer and then executing on Datafusion (With DF optimizer turned off) takes around ~6 mins
